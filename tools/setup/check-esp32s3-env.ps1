@@ -71,10 +71,9 @@ function Invoke-NativeCommandCapture {
         [string[]]$Arguments = @()
     )
 
-    # Windows PowerShell 5.1 converts native-process stderr into ErrorRecord
-    # objects. With ErrorActionPreference=Stop, an informational ESP-IDF stderr
-    # message can otherwise terminate this checker even when the process exits 0.
-    # Redirect stderr to a temporary file and judge success from the exit code.
+    # Windows PowerShell 5.1 turns native-process stderr into ErrorRecord objects.
+    # Redirect stderr and judge the command by its real exit code so informational
+    # ESP-IDF diagnostics do not terminate this checker.
     $stderrPath = [IO.Path]::GetTempFileName()
     $savedErrorActionPreference = $ErrorActionPreference
     try {
@@ -82,6 +81,7 @@ function Invoke-NativeCommandCapture {
         $stdout = @(& $Path @Arguments 2> $stderrPath)
         $exitCode = $LASTEXITCODE
         $stderr = ''
+
         if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
             $stderrRaw = Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue
             if ($null -ne $stderrRaw) {
@@ -91,14 +91,28 @@ function Invoke-NativeCommandCapture {
 
         return [pscustomobject]@{
             ExitCode = $exitCode
-            StdOut = $stdout
-            StdErr = $stderr
+            StdOut   = $stdout
+            StdErr   = $stderr
         }
     }
     finally {
         $ErrorActionPreference = $savedErrorActionPreference
         Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Join-CapturedOutput {
+    param([Parameter(Mandatory = $true)]$Result)
+
+    $stdoutText = (($Result.StdOut | ForEach-Object {
+        if ($null -ne $_) { $_.ToString() }
+    }) -join ' ').Trim()
+
+    if (-not [string]::IsNullOrWhiteSpace($Result.StdErr)) {
+        return ($stdoutText + ' ' + $Result.StdErr).Trim()
+    }
+
+    return $stdoutText
 }
 
 Write-Host 'pibbi ESP32-S3 development environment check'
@@ -130,11 +144,8 @@ if ($python) {
         Write-CheckResult FAIL 'Python' "unable to parse version: $pythonVersionText"
     }
 
-    # Host pip is convenient but is not a required ESP-IDF runtime dependency once
-    # idf_tools.py has created the repository-local managed Python environment.
-    # Validate that managed environment separately below instead of failing here.
     $pipResult = Invoke-NativeCommandCapture -Path $python.Path -Arguments ($python.PrefixArgs + @('-m', 'pip', '--version'))
-    $pipText = (($pipResult.StdOut | ForEach-Object { if ($null -ne $_) { $_.ToString() } }) -join ' ').Trim()
+    $pipText = Join-CapturedOutput -Result $pipResult
     if ($pipResult.ExitCode -eq 0 -and $pipText -match '^pip\s+') {
         Write-CheckResult PASS 'Host pip' $pipText
     }
@@ -170,8 +181,9 @@ else {
     }
 
     $submodules = @(& git -C $idfRoot submodule status --recursive 2>$null)
+    $submoduleExitCode = $LASTEXITCODE
     $badSubmodules = @($submodules | Where-Object { $_ -match '^[+-]' })
-    if ($LASTEXITCODE -ne 0) {
+    if ($submoduleExitCode -ne 0) {
         Write-CheckResult FAIL 'ESP-IDF submodules' 'git submodule status failed'
     }
     elseif ($badSubmodules.Count -gt 0) {
@@ -189,7 +201,10 @@ else {
     Write-CheckResult FAIL 'IDF_TOOLS_PATH' "repository-local tools not found: $idfToolsRoot"
 }
 
-if ($python -and (Test-Path -LiteralPath (Join-Path $idfRoot 'tools\idf_tools.py') -PathType Leaf) -and (Test-Path -LiteralPath $idfToolsRoot -PathType Container)) {
+if ($python -and
+    (Test-Path -LiteralPath (Join-Path $idfRoot 'tools\idf_tools.py') -PathType Leaf) -and
+    (Test-Path -LiteralPath $idfToolsRoot -PathType Container)) {
+
     $oldIdfToolsPath = $env:IDF_TOOLS_PATH
     $oldIdfPath = $env:IDF_PATH
     try {
@@ -202,30 +217,20 @@ if ($python -and (Test-Path -LiteralPath (Join-Path $idfRoot 'tools\idf_tools.py
             Write-CheckResult PASS 'ESP-IDF managed tools' 'idf_tools.py check passed'
         }
         else {
-            $detail = (($toolResult.StdOut | ForEach-Object { if ($null -ne $_) { $_.ToString() } }) -join ' ').Trim()
-            if (-not [string]::IsNullOrWhiteSpace($toolResult.StdErr)) {
-                $detail = ($detail + ' ' + $toolResult.StdErr).Trim()
-            }
-            Write-CheckResult FAIL 'ESP-IDF managed tools' $detail
+            Write-CheckResult FAIL 'ESP-IDF managed tools' (Join-CapturedOutput -Result $toolResult)
         }
 
-        # Resolve the Python virtual environment chosen by this pinned ESP-IDF and
-        # verify dependencies using that interpreter, not the machine-wide Python.
-        # idf_tools.py export may emit informational stderr when it intentionally
-        # ignores a too-new system tool (for example CMake 4.x). That is not an
-        # environment failure if export itself succeeds and chooses managed tools.
+        # ESP-IDF v5.2.1 exports IDF_PYTHON_ENV_PATH (not ESP_PYTHON_ENV_PATH).
+        # Resolve the virtual environment through the pinned upstream idf_tools.py
+        # and then validate dependencies with the interpreter from that environment.
         $exportResult = Invoke-NativeCommandCapture -Path $python.Path -Arguments ($python.PrefixArgs + @($idfToolsPy, 'export', '--format', 'key-value'))
         if ($exportResult.ExitCode -ne 0) {
-            $detail = (($exportResult.StdOut | ForEach-Object { if ($null -ne $_) { $_.ToString() } }) -join ' ').Trim()
-            if (-not [string]::IsNullOrWhiteSpace($exportResult.StdErr)) {
-                $detail = ($detail + ' ' + $exportResult.StdErr).Trim()
-            }
-            Write-CheckResult FAIL 'ESP-IDF Python environment' "unable to resolve managed environment: $detail"
+            Write-CheckResult FAIL 'ESP-IDF Python environment' ("unable to resolve managed environment: {0}" -f (Join-CapturedOutput -Result $exportResult))
         }
         else {
-            $managedPythonRoot = Get-KeyValueOutputValue -Lines $exportResult.StdOut -Name 'ESP_PYTHON_ENV_PATH'
+            $managedPythonRoot = Get-KeyValueOutputValue -Lines $exportResult.StdOut -Name 'IDF_PYTHON_ENV_PATH'
             if ([string]::IsNullOrWhiteSpace($managedPythonRoot)) {
-                Write-CheckResult FAIL 'ESP-IDF Python environment' 'ESP_PYTHON_ENV_PATH was not returned by idf_tools.py export'
+                Write-CheckResult FAIL 'ESP-IDF Python environment' 'IDF_PYTHON_ENV_PATH was not returned by idf_tools.py export'
             }
             else {
                 $managedPython = Join-Path $managedPythonRoot 'Scripts\python.exe'
@@ -234,21 +239,14 @@ if ($python -and (Test-Path -LiteralPath (Join-Path $idfRoot 'tools\idf_tools.py
                 }
                 else {
                     $managedVersionResult = Invoke-NativeCommandCapture -Path $managedPython -Arguments @('--version')
-                    $managedVersion = (($managedVersionResult.StdOut | ForEach-Object { if ($null -ne $_) { $_.ToString() } }) -join ' ').Trim()
-                    if ([string]::IsNullOrWhiteSpace($managedVersion)) {
-                        $managedVersion = $managedVersionResult.StdErr
-                    }
+                    $managedVersion = Join-CapturedOutput -Result $managedVersionResult
 
                     $dependencyResult = Invoke-NativeCommandCapture -Path $managedPython -Arguments @($idfToolsPy, 'check-python-dependencies')
                     if ($dependencyResult.ExitCode -eq 0) {
                         Write-CheckResult PASS 'ESP-IDF Python environment' "$managedVersion; dependency check passed"
                     }
                     else {
-                        $detail = (($dependencyResult.StdOut | ForEach-Object { if ($null -ne $_) { $_.ToString() } }) -join ' ').Trim()
-                        if (-not [string]::IsNullOrWhiteSpace($dependencyResult.StdErr)) {
-                            $detail = ($detail + ' ' + $dependencyResult.StdErr).Trim()
-                        }
-                        Write-CheckResult FAIL 'ESP-IDF Python environment' $detail
+                        Write-CheckResult FAIL 'ESP-IDF Python environment' (Join-CapturedOutput -Result $dependencyResult)
                     }
                 }
             }
@@ -318,6 +316,7 @@ if ($script:RequiredFailures -gt 0) {
     Write-Host ("Environment check failed: {0} required check(s) failed; {1} warning(s)." -f $script:RequiredFailures, $script:Warnings)
     exit 1
 }
+
 if ($script:Warnings -gt 0) {
     Write-Host ("Environment check passed with {0} warning(s)." -f $script:Warnings)
 }
