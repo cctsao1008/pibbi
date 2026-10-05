@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Port,
-    [string]$Example = 'helloworld'
+    [string]$Example = 'factory_firmware'
 )
 
 $ErrorActionPreference = 'Stop'
