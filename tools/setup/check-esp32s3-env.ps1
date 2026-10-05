@@ -54,6 +54,7 @@ function Get-KeyValueOutputValue {
     )
 
     foreach ($lineObject in $Lines) {
+        if ($null -eq $lineObject) { continue }
         $line = $lineObject.ToString()
         $prefix = "$Name="
         if ($line.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
@@ -82,7 +83,10 @@ function Invoke-NativeCommandCapture {
         $exitCode = $LASTEXITCODE
         $stderr = ''
         if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
-            $stderr = (Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue).Trim()
+            $stderrRaw = Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue
+            if ($null -ne $stderrRaw) {
+                $stderr = $stderrRaw.Trim()
+            }
         }
 
         return [pscustomobject]@{
@@ -130,7 +134,7 @@ if ($python) {
     # idf_tools.py has created the repository-local managed Python environment.
     # Validate that managed environment separately below instead of failing here.
     $pipResult = Invoke-NativeCommandCapture -Path $python.Path -Arguments ($python.PrefixArgs + @('-m', 'pip', '--version'))
-    $pipText = (($pipResult.StdOut | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+    $pipText = (($pipResult.StdOut | ForEach-Object { if ($null -ne $_) { $_.ToString() } }) -join ' ').Trim()
     if ($pipResult.ExitCode -eq 0 -and $pipText -match '^pip\s+') {
         Write-CheckResult PASS 'Host pip' $pipText
     }
@@ -198,7 +202,7 @@ if ($python -and (Test-Path -LiteralPath (Join-Path $idfRoot 'tools\idf_tools.py
             Write-CheckResult PASS 'ESP-IDF managed tools' 'idf_tools.py check passed'
         }
         else {
-            $detail = (($toolResult.StdOut | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+            $detail = (($toolResult.StdOut | ForEach-Object { if ($null -ne $_) { $_.ToString() } }) -join ' ').Trim()
             if (-not [string]::IsNullOrWhiteSpace($toolResult.StdErr)) {
                 $detail = ($detail + ' ' + $toolResult.StdErr).Trim()
             }
@@ -212,7 +216,7 @@ if ($python -and (Test-Path -LiteralPath (Join-Path $idfRoot 'tools\idf_tools.py
         # environment failure if export itself succeeds and chooses managed tools.
         $exportResult = Invoke-NativeCommandCapture -Path $python.Path -Arguments ($python.PrefixArgs + @($idfToolsPy, 'export', '--format', 'key-value'))
         if ($exportResult.ExitCode -ne 0) {
-            $detail = (($exportResult.StdOut | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+            $detail = (($exportResult.StdOut | ForEach-Object { if ($null -ne $_) { $_.ToString() } }) -join ' ').Trim()
             if (-not [string]::IsNullOrWhiteSpace($exportResult.StdErr)) {
                 $detail = ($detail + ' ' + $exportResult.StdErr).Trim()
             }
@@ -230,7 +234,7 @@ if ($python -and (Test-Path -LiteralPath (Join-Path $idfRoot 'tools\idf_tools.py
                 }
                 else {
                     $managedVersionResult = Invoke-NativeCommandCapture -Path $managedPython -Arguments @('--version')
-                    $managedVersion = (($managedVersionResult.StdOut | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+                    $managedVersion = (($managedVersionResult.StdOut | ForEach-Object { if ($null -ne $_) { $_.ToString() } }) -join ' ').Trim()
                     if ([string]::IsNullOrWhiteSpace($managedVersion)) {
                         $managedVersion = $managedVersionResult.StdErr
                     }
@@ -240,7 +244,7 @@ if ($python -and (Test-Path -LiteralPath (Join-Path $idfRoot 'tools\idf_tools.py
                         Write-CheckResult PASS 'ESP-IDF Python environment' "$managedVersion; dependency check passed"
                     }
                     else {
-                        $detail = (($dependencyResult.StdOut | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+                        $detail = (($dependencyResult.StdOut | ForEach-Object { if ($null -ne $_) { $_.ToString() } }) -join ' ').Trim()
                         if (-not [string]::IsNullOrWhiteSpace($dependencyResult.StdErr)) {
                             $detail = ($detail + ' ' + $dependencyResult.StdErr).Trim()
                         }
