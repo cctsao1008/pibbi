@@ -43,15 +43,18 @@ The HX6538 environment is deliberately isolated from other firmware projects. In
 
 See [`tools/setup/README.md`](tools/setup/README.md) for versioning, bootstrap, and SDK pinning policy.
 
-## HX6538 upstream build
+## HX6538 build and image generation
 
-Use the pibbi wrapper instead of invoking the vendor build manually:
+Use pibbi wrappers instead of invoking the vendor flow manually:
 
 ```powershell
 .\tools\hx6538\build.ps1
+.\tools\hx6538\image.ps1
 ```
 
-The wrapper performs a clean upstream build with the pinned local toolchain, validates the expected ELF, records build provenance under `artifacts/`, and restores the vendor SDK's known build-generated changes to tracked prebuilt `.a` archives. Unexpected modifications in the vendor tree stop the build rather than being silently discarded.
+`build.ps1` performs a clean upstream build with the pinned local toolchain, validates the expected ELF, records build provenance under `artifacts/`, and restores the vendor SDK's known build-generated changes to tracked prebuilt `.a` archives.
+
+`image.ps1` verifies that ELF against the build manifest, exports the image-generator files from the exact SDK commit into an isolated staging directory, runs the upstream Windows image generator there, and records the resulting `output.img` plus its provenance under `artifacts/`. The live vendor checkout remains untouched.
 
 See [`tools/hx6538/README.md`](tools/hx6538/README.md) for details.
 
