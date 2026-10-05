@@ -13,6 +13,15 @@ function Get-Hx6538ToolConfig {
     return Import-PowerShellDataFile -LiteralPath $configPath
 }
 
+function Get-Esp32S3ToolConfig {
+    $configPath = Join-Path $PSScriptRoot 'esp32s3-tools.psd1'
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        throw "ESP32-S3 tool configuration not found: $configPath"
+    }
+
+    return Import-PowerShellDataFile -LiteralPath $configPath
+}
+
 function Get-PibbiExecutable {
     param(
         [Parameter(Mandatory = $true)]
