@@ -29,7 +29,6 @@ if ($missing.Count -gt 0) {
     throw ("HX6538 environment is not bootstrapped. Missing:`n  " + ($missing -join "`n  ") + "`nRun .\tools\setup\bootstrap-hx6538.ps1 first.")
 }
 
-# Remove duplicate project-local entries before prepending them again.
 $currentPath = @($env:PATH -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 $normalizedArm = [IO.Path]::GetFullPath($armBin).TrimEnd('\')
 $normalizedBuild = [IO.Path]::GetFullPath($buildToolsBin).TrimEnd('\')
@@ -49,4 +48,4 @@ Write-Host "SSCMA_WE2_ROOT   = $env:SSCMA_WE2_ROOT"
 Write-Host "Arm GNU bin      = $normalizedArm"
 Write-Host "GNU Make bin     = $normalizedBuild"
 Write-Host ''
-Write-Host 'Run .\tools\setup\check-env.ps1 to verify the active environment.'
+Write-Host 'Run .\tools\setup\check-hx6538-env.ps1 to verify the active environment.'
