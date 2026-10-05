@@ -54,3 +54,40 @@ Preserve the upstream-generated tracked archive modifications only when investig
 ```
 
 Neither option should be used for a release or baseline-validation build.
+
+## `image.ps1`
+
+Generates the HX6538 flash image from the verified ELF artifact produced by `build.ps1`.
+
+```powershell
+.\tools\hx6538\image.ps1
+```
+
+The image wrapper intentionally does **not** run `we2_local_image_gen.exe` inside the live `third_party/sscma-example-we2` checkout. Instead it:
+
+1. requires a clean SDK tree and a build manifest for the current SDK HEAD;
+2. verifies the ELF SHA-256 against the build manifest;
+3. exports `we2_image_gen_local/` from the exact SDK commit with `git archive`;
+4. stages the verified ELF into that isolated copy using the upstream partition JSON;
+5. runs the upstream Windows generator with `project_case1_blp_wlcsp.json`;
+6. validates and copies `output.img` into pibbi's artifact area;
+7. records the generator/config/input/output hashes in `image-manifest.json`.
+
+Artifacts are written under:
+
+```text
+artifacts/hx6538/image/<sdk-short-sha>/
+├─ output.img
+├─ image-manifest.json
+└─ image-gen.log
+```
+
+This isolates image-generation side effects and ignored temporary files from the vendor SDK checkout while preserving provenance back to the exact build ELF and SDK commit.
+
+If image generation fails, the staging directory under `.tools/work/hx6538-image/` is preserved automatically for inspection. On success it is removed unless `-KeepWorkDir` is specified:
+
+```powershell
+.\tools\hx6538\image.ps1 -KeepWorkDir
+```
+
+The SDK commit should still not be pinned after image generation alone. Pinning waits until the generated image has been flashed to the Watcher and the boot/camera/interface smoke test has passed.
