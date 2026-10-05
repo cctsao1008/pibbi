@@ -15,6 +15,12 @@
 
     EspIdfTools = @{
         Directory = '.tools\esp-idf'
+
+        # ESP-IDF officially supports rewriting GitHub release-asset downloads
+        # through Espressif's download server via IDF_GITHUB_ASSETS. This is the
+        # pibbi default because large toolchain archives were observed to be much
+        # more reliable and significantly faster than direct GitHub downloads.
+        GitHubAssetsHost = 'dl.espressif.com/github_assets'
     }
 
     WatcherFirmware = @{
