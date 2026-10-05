@@ -40,6 +40,80 @@ function Resolve-PibbiArtifactPath {
     return (Join-Path $Root $localPath)
 }
 
+function Get-StringSha256 {
+    param([Parameter(Mandatory = $true)][string]$Text)
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+        $hash = $sha256.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash)).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+    }
+}
+
+function Get-ImageInputSetSha256 {
+    param(
+        [Parameter(Mandatory = $true)][string]$SdkCommit,
+        [Parameter(Mandatory = $true)][string]$BuildManifestSha256,
+        [Parameter(Mandatory = $true)][string]$ElfSha256,
+        [Parameter(Mandatory = $true)][string]$GeneratorSha256,
+        [Parameter(Mandatory = $true)][string]$ProjectConfigSha256,
+        [Parameter(Mandatory = $true)][string]$PartitionConfigSha256
+    )
+
+    $identity = @(
+        "sdk=$SdkCommit"
+        "build_manifest=$BuildManifestSha256"
+        "elf=$ElfSha256"
+        "generator=$GeneratorSha256"
+        "project_config=$ProjectConfigSha256"
+        "partition_config=$PartitionConfigSha256"
+    ) -join "`n"
+
+    return Get-StringSha256 -Text $identity
+}
+
+function Get-ManifestInputSetSha256 {
+    param([Parameter(Mandatory = $true)]$Manifest)
+
+    try {
+        if (($Manifest.PSObject.Properties.Name -contains 'InputSetSha256') -and
+            -not [string]::IsNullOrWhiteSpace([string]$Manifest.InputSetSha256)) {
+            return ([string]$Manifest.InputSetSha256).ToLowerInvariant()
+        }
+
+        $sdkCommit = [string]$Manifest.SdkCommit
+        $buildManifestSha256 = [string]$Manifest.Build.ManifestSha256
+        $elfSha256 = [string]$Manifest.Build.ElfSha256
+        $generatorSha256 = [string]$Manifest.Generator.ExecutableSha256
+        $projectConfigSha256 = [string]$Manifest.Generator.ProjectConfigSha256
+        $partitionConfigSha256 = [string]$Manifest.Generator.PartitionConfigSha256
+
+        if ([string]::IsNullOrWhiteSpace($sdkCommit) -or
+            [string]::IsNullOrWhiteSpace($buildManifestSha256) -or
+            [string]::IsNullOrWhiteSpace($elfSha256) -or
+            [string]::IsNullOrWhiteSpace($generatorSha256) -or
+            [string]::IsNullOrWhiteSpace($projectConfigSha256) -or
+            [string]::IsNullOrWhiteSpace($partitionConfigSha256)) {
+            return $null
+        }
+
+        return Get-ImageInputSetSha256 `
+            -SdkCommit $sdkCommit `
+            -BuildManifestSha256 $buildManifestSha256 `
+            -ElfSha256 $elfSha256 `
+            -GeneratorSha256 $generatorSha256 `
+            -ProjectConfigSha256 $projectConfigSha256 `
+            -PartitionConfigSha256 $partitionConfigSha256
+    }
+    catch {
+        return $null
+    }
+}
+
 if (-not (Test-Path -LiteralPath $sdkRoot -PathType Container)) {
     throw "HX6538 SDK checkout not found: $sdkRoot. Run tools\setup\bootstrap-hx6538.ps1 first."
 }
@@ -109,7 +183,11 @@ $extractRoot = Join-Path $workRoot 'src'
 $archivePath = Join-Path $workRoot 'we2-image-gen.zip'
 New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
 
-$artifactDir = Join-Path $repoRoot (Join-Path 'artifacts\hx6538\image' $sdkShort)
+# Signed image generation is not assumed to be byte-reproducible. Preserve every
+# run instead of overwriting the previous output for the same SDK revision.
+$runId = ('{0}-{1}' -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ'), ([guid]::NewGuid().ToString('N').Substring(0, 8)))
+$artifactRoot = Join-Path $repoRoot (Join-Path 'artifacts\hx6538\image' $sdkShort)
+$artifactDir = Join-Path $artifactRoot $runId
 New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
 $logPath = Join-Path $artifactDir 'image-gen.log'
 $stdoutPath = Join-Path $workRoot 'image-gen.stdout.log'
@@ -175,7 +253,15 @@ try {
     $generatorHash = (Get-FileHash -LiteralPath $generatorPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $projectConfigHash = (Get-FileHash -LiteralPath $projectConfigPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $partitionHash = (Get-FileHash -LiteralPath $partitionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $inputSetHash = Get-ImageInputSetSha256 `
+        -SdkCommit $sdkHead `
+        -BuildManifestSha256 $buildManifestHash `
+        -ElfSha256 $buildElfHash `
+        -GeneratorSha256 $generatorHash `
+        -ProjectConfigSha256 $projectConfigHash `
+        -PartitionConfigSha256 $partitionHash
 
+    Write-Host ("Input set SHA256: {0}" -f $inputSetHash)
     Write-Host ('==> {0} {1}' -f $generatorName, $projectConfigName)
     $process = Start-Process `
         -FilePath $generatorPath `
@@ -225,16 +311,52 @@ try {
         throw "Copied image SHA-256 mismatch. Generated: $imageHash; artifact: $artifactImageHash"
     }
 
+    # Compare with prior image manifests that represent the same validated input set.
+    # Legacy schema-v1 manifests are supported by deriving their input-set identity.
+    $priorComparable = @()
+    if (Test-Path -LiteralPath $artifactRoot -PathType Container) {
+        $priorManifestFiles = @(Get-ChildItem -LiteralPath $artifactRoot -Filter 'image-manifest.json' -File -Recurse -ErrorAction SilentlyContinue)
+        foreach ($priorManifestFile in $priorManifestFiles) {
+            try {
+                $priorManifest = Get-Content -LiteralPath $priorManifestFile.FullName -Raw | ConvertFrom-Json
+                $priorInputSetHash = Get-ManifestInputSetSha256 -Manifest $priorManifest
+                $priorImageHash = [string]$priorManifest.Image.Sha256
+                if ($priorInputSetHash -eq $inputSetHash -and -not [string]::IsNullOrWhiteSpace($priorImageHash)) {
+                    $priorComparable += [pscustomobject]@{
+                        Manifest = $priorManifestFile.FullName
+                        ImageSha256 = $priorImageHash.ToLowerInvariant()
+                    }
+                }
+            }
+            catch {
+                # A malformed historical manifest should not invalidate the current generation.
+            }
+        }
+    }
+
+    $priorDifferent = @($priorComparable | Where-Object { $_.ImageSha256 -ne $imageHash })
+    if ($priorDifferent.Count -gt 0) {
+        $byteReproducibility = 'observed-nondeterministic'
+    }
+    elseif ($priorComparable.Count -gt 0) {
+        $byteReproducibility = 'observed-identical'
+    }
+    else {
+        $byteReproducibility = 'unverified'
+    }
+
     $buildManifestRelative = ('artifacts/hx6538/build/{0}/build-manifest.json' -f $sdkShort)
     $buildElfRelative = ('artifacts/hx6538/build/{0}/{1}' -f $sdkShort, $buildElfItem.Name)
-    $imageArtifactRelative = ('artifacts/hx6538/image/{0}/output.img' -f $sdkShort)
-    $logRelative = ('artifacts/hx6538/image/{0}/image-gen.log' -f $sdkShort)
+    $imageArtifactRelative = ('artifacts/hx6538/image/{0}/{1}/output.img' -f $sdkShort, $runId)
+    $logRelative = ('artifacts/hx6538/image/{0}/{1}/image-gen.log' -f $sdkShort, $runId)
 
     $manifest = [ordered]@{
-        SchemaVersion = 1
+        SchemaVersion = 2
+        RunId = $runId
         GeneratedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
         SdkCommit = $sdkHead
         SdkBranch = $sdkBranch
+        InputSetSha256 = $inputSetHash
         Build = [ordered]@{
             Manifest = $buildManifestRelative
             ManifestSha256 = $buildManifestHash
@@ -255,22 +377,35 @@ try {
             Bytes = $generatedImageItem.Length
             Sha256 = $imageHash
         }
+        Reproducibility = [ordered]@{
+            ByteForByteStatus = $byteReproducibility
+            ComparablePriorRuns = $priorComparable.Count
+            DifferingPriorImageSha256 = @($priorDifferent | ForEach-Object { $_.ImageSha256 } | Select-Object -Unique)
+            Note = 'The upstream secure-boot flow regenerates content certificates during image generation. Treat output.img SHA-256 as the identity of the exact run; do not assume byte-for-byte equality across regenerations.'
+        }
         Log = $logRelative
     }
 
     $manifestPath = Join-Path $artifactDir 'image-manifest.json'
-    $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+    $manifest | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
     $generationSucceeded = $true
 
     Write-Host ''
     Write-Host 'HX6538 image generation PASS'
-    Write-Host ("Image     : {0}" -f $artifactImage)
-    Write-Host ("Image bytes: {0}" -f $generatedImageItem.Length)
+    Write-Host ("Run ID      : {0}" -f $runId)
+    Write-Host ("Input SHA256: {0}" -f $inputSetHash)
+    Write-Host ("Image       : {0}" -f $artifactImage)
+    Write-Host ("Image bytes : {0}" -f $generatedImageItem.Length)
     Write-Host ("Image SHA256: {0}" -f $imageHash)
-    Write-Host ("Manifest  : {0}" -f $manifestPath)
-    Write-Host ("Log       : {0}" -f $logPath)
-    Write-Host 'SDK tree  : untouched (image generation ran from an archived staging copy)'
+    Write-Host ("Manifest    : {0}" -f $manifestPath)
+    Write-Host ("Log         : {0}" -f $logPath)
+    Write-Host ("Byte repeat : {0}" -f $byteReproducibility)
+    Write-Host 'SDK tree    : untouched (image generation ran from an archived staging copy)'
+
+    if ($byteReproducibility -eq 'observed-nondeterministic') {
+        Write-Warning 'A prior run with the same validated input set produced a different output.img SHA-256. Preserve and flash the exact run artifact referenced by its manifest.'
+    }
 }
 finally {
     if ($generationSucceeded -and -not $KeepWorkDir) {
