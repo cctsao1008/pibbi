@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$Force,
-    [switch]$UpdateWatcher
+    [switch]$UpdateWatcher,
+    [string]$GitHubAssetsHost = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -124,9 +125,28 @@ if ($Force -and (Test-Path -LiteralPath $idfToolsRoot)) {
 }
 New-Item -ItemType Directory -Force -Path $idfToolsRoot | Out-Null
 
+# ESP-IDF can rewrite GitHub release-asset URLs to an Espressif download host
+# through IDF_GITHUB_ASSETS. Prefer an explicit command-line override, then an
+# existing caller environment, then pibbi's repository policy.
+$effectiveGitHubAssetsHost = $GitHubAssetsHost
+if ([string]::IsNullOrWhiteSpace($effectiveGitHubAssetsHost)) {
+    if (-not [string]::IsNullOrWhiteSpace($env:IDF_GITHUB_ASSETS)) {
+        $effectiveGitHubAssetsHost = $env:IDF_GITHUB_ASSETS
+    }
+    elseif ($config.EspIdfTools.ContainsKey('GitHubAssetsHost')) {
+        $effectiveGitHubAssetsHost = $config.EspIdfTools.GitHubAssetsHost
+    }
+}
+
 $oldIdfToolsPath = $env:IDF_TOOLS_PATH
+$oldGitHubAssets = $env:IDF_GITHUB_ASSETS
 try {
     $env:IDF_TOOLS_PATH = $idfToolsRoot
+    if (-not [string]::IsNullOrWhiteSpace($effectiveGitHubAssetsHost)) {
+        $env:IDF_GITHUB_ASSETS = $effectiveGitHubAssetsHost
+        Write-Host "ESP-IDF asset host: https://$effectiveGitHubAssetsHost"
+    }
+
     $idfToolsPy = Join-Path $idfRoot 'tools\idf_tools.py'
     Invoke-Python -Launcher $python -Arguments @($idfToolsPy, 'install', "--targets=$($config.EspIdf.Target)")
     Invoke-Python -Launcher $python -Arguments @($idfToolsPy, 'install-python-env')
@@ -137,6 +157,13 @@ finally {
     }
     else {
         $env:IDF_TOOLS_PATH = $oldIdfToolsPath
+    }
+
+    if ($null -eq $oldGitHubAssets) {
+        Remove-Item Env:IDF_GITHUB_ASSETS -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:IDF_GITHUB_ASSETS = $oldGitHubAssets
     }
 }
 
