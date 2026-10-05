@@ -20,7 +20,7 @@ pibbi/
 ├─ third_party/               # external SDK checkouts; not vendored into Git
 ├─ tools/
 │  ├─ setup/                  # reproducible development environment
-│  └─ hx6538/                 # build/image/flash workflow (next stage)
+│  └─ hx6538/                 # vendor-safe build/image/flash workflow
 └─ .tools/                    # local pinned host tools; ignored by Git
 ```
 
@@ -42,6 +42,18 @@ For an interactive shell that uses pibbi's pinned HX6538 compiler and GNU Make w
 The HX6538 environment is deliberately isolated from other firmware projects. In particular, pibbi uses the upstream-documented Arm GNU Toolchain 13.2.Rel1 locally instead of replacing newer system installations.
 
 See [`tools/setup/README.md`](tools/setup/README.md) for versioning, bootstrap, and SDK pinning policy.
+
+## HX6538 upstream build
+
+Use the pibbi wrapper instead of invoking the vendor build manually:
+
+```powershell
+.\tools\hx6538\build.ps1
+```
+
+The wrapper performs a clean upstream build with the pinned local toolchain, validates the expected ELF, records build provenance under `artifacts/`, and restores the vendor SDK's known build-generated changes to tracked prebuilt `.a` archives. Unexpected modifications in the vendor tree stop the build rather than being silently discarded.
+
+See [`tools/hx6538/README.md`](tools/hx6538/README.md) for details.
 
 ## Bring-up policy
 
