@@ -1,0 +1,24 @@
+# Repository-local tool installations and download cache
+.tools/
+
+# External SDK/source checkouts are provisioned by bootstrap scripts
+third_party/*
+!third_party/README.md
+
+# Python local environments/caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Local build outputs
+build/
+out/
+artifacts/
+
+# Logs and editor/OS noise
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
