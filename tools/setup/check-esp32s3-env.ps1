@@ -64,6 +64,39 @@ function Get-KeyValueOutputValue {
     return $null
 }
 
+function Invoke-NativeCommandCapture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string[]]$Arguments = @()
+    )
+
+    # Windows PowerShell 5.1 converts native-process stderr into ErrorRecord
+    # objects. With ErrorActionPreference=Stop, an informational ESP-IDF stderr
+    # message can otherwise terminate this checker even when the process exits 0.
+    # Redirect stderr to a temporary file and judge success from the exit code.
+    $stderrPath = [IO.Path]::GetTempFileName()
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $stdout = @(& $Path @Arguments 2> $stderrPath)
+        $exitCode = $LASTEXITCODE
+        $stderr = ''
+        if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
+            $stderr = (Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue).Trim()
+        }
+
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            StdOut = $stdout
+            StdErr = $stderr
+        }
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host 'pibbi ESP32-S3 development environment check'
 Write-Host ''
 
@@ -96,9 +129,9 @@ if ($python) {
     # Host pip is convenient but is not a required ESP-IDF runtime dependency once
     # idf_tools.py has created the repository-local managed Python environment.
     # Validate that managed environment separately below instead of failing here.
-    $pipOutput = @(& $python.Path @($python.PrefixArgs + @('-m', 'pip', '--version')) 2>&1)
-    $pipText = (($pipOutput | ForEach-Object { $_.ToString() }) -join ' ').Trim()
-    if ($LASTEXITCODE -eq 0 -and $pipText -match '^pip\s+') {
+    $pipResult = Invoke-NativeCommandCapture -Path $python.Path -Arguments ($python.PrefixArgs + @('-m', 'pip', '--version'))
+    $pipText = (($pipResult.StdOut | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+    if ($pipResult.ExitCode -eq 0 -and $pipText -match '^pip\s+') {
         Write-CheckResult PASS 'Host pip' $pipText
     }
     else {
@@ -160,24 +193,33 @@ if ($python -and (Test-Path -LiteralPath (Join-Path $idfRoot 'tools\idf_tools.py
         $env:IDF_PATH = $idfRoot
         $idfToolsPy = Join-Path $idfRoot 'tools\idf_tools.py'
 
-        $toolOutput = @(& $python.Path @($python.PrefixArgs + @($idfToolsPy, 'check')) 2>&1)
-        if ($LASTEXITCODE -eq 0) {
+        $toolResult = Invoke-NativeCommandCapture -Path $python.Path -Arguments ($python.PrefixArgs + @($idfToolsPy, 'check'))
+        if ($toolResult.ExitCode -eq 0) {
             Write-CheckResult PASS 'ESP-IDF managed tools' 'idf_tools.py check passed'
         }
         else {
-            $detail = (($toolOutput | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+            $detail = (($toolResult.StdOut | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+            if (-not [string]::IsNullOrWhiteSpace($toolResult.StdErr)) {
+                $detail = ($detail + ' ' + $toolResult.StdErr).Trim()
+            }
             Write-CheckResult FAIL 'ESP-IDF managed tools' $detail
         }
 
         # Resolve the Python virtual environment chosen by this pinned ESP-IDF and
         # verify dependencies using that interpreter, not the machine-wide Python.
-        $exportOutput = @(& $python.Path @($python.PrefixArgs + @($idfToolsPy, 'export', '--format', 'key-value')) 2>&1)
-        if ($LASTEXITCODE -ne 0) {
-            $detail = (($exportOutput | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+        # idf_tools.py export may emit informational stderr when it intentionally
+        # ignores a too-new system tool (for example CMake 4.x). That is not an
+        # environment failure if export itself succeeds and chooses managed tools.
+        $exportResult = Invoke-NativeCommandCapture -Path $python.Path -Arguments ($python.PrefixArgs + @($idfToolsPy, 'export', '--format', 'key-value'))
+        if ($exportResult.ExitCode -ne 0) {
+            $detail = (($exportResult.StdOut | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+            if (-not [string]::IsNullOrWhiteSpace($exportResult.StdErr)) {
+                $detail = ($detail + ' ' + $exportResult.StdErr).Trim()
+            }
             Write-CheckResult FAIL 'ESP-IDF Python environment' "unable to resolve managed environment: $detail"
         }
         else {
-            $managedPythonRoot = Get-KeyValueOutputValue -Lines $exportOutput -Name 'ESP_PYTHON_ENV_PATH'
+            $managedPythonRoot = Get-KeyValueOutputValue -Lines $exportResult.StdOut -Name 'ESP_PYTHON_ENV_PATH'
             if ([string]::IsNullOrWhiteSpace($managedPythonRoot)) {
                 Write-CheckResult FAIL 'ESP-IDF Python environment' 'ESP_PYTHON_ENV_PATH was not returned by idf_tools.py export'
             }
@@ -187,13 +229,21 @@ if ($python -and (Test-Path -LiteralPath (Join-Path $idfRoot 'tools\idf_tools.py
                     Write-CheckResult FAIL 'ESP-IDF Python environment' "managed interpreter not found: $managedPython"
                 }
                 else {
-                    $managedVersion = (& $managedPython --version 2>&1 | Select-Object -First 1).ToString()
-                    $dependencyOutput = @(& $managedPython $idfToolsPy check-python-dependencies 2>&1)
-                    if ($LASTEXITCODE -eq 0) {
+                    $managedVersionResult = Invoke-NativeCommandCapture -Path $managedPython -Arguments @('--version')
+                    $managedVersion = (($managedVersionResult.StdOut | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+                    if ([string]::IsNullOrWhiteSpace($managedVersion)) {
+                        $managedVersion = $managedVersionResult.StdErr
+                    }
+
+                    $dependencyResult = Invoke-NativeCommandCapture -Path $managedPython -Arguments @($idfToolsPy, 'check-python-dependencies')
+                    if ($dependencyResult.ExitCode -eq 0) {
                         Write-CheckResult PASS 'ESP-IDF Python environment' "$managedVersion; dependency check passed"
                     }
                     else {
-                        $detail = (($dependencyOutput | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+                        $detail = (($dependencyResult.StdOut | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+                        if (-not [string]::IsNullOrWhiteSpace($dependencyResult.StdErr)) {
+                            $detail = ($detail + ' ' + $dependencyResult.StdErr).Trim()
+                        }
                         Write-CheckResult FAIL 'ESP-IDF Python environment' $detail
                     }
                 }
