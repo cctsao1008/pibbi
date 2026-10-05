@@ -86,25 +86,28 @@ See [`tools/hx6538/README.md`](tools/hx6538/README.md).
 
 ## ESP32-S3 / Watcher workflow
 
-Build the smallest upstream Watcher example first:
+The Watcher factory firmware contains a critical `nvsfactory` partition. Preserve it before the first flash:
+
+```powershell
+.\tools\esp32s3\inspect-device.ps1 -Port COM14
+.\tools\esp32s3\backup-nvsfactory.ps1 -Port COM14
+.\tools\esp32s3\backup-flash.ps1 -Port COM14
+```
+
+Build the upstream factory-compatible firmware:
 
 ```powershell
 .\tools\esp32s3\build.ps1
 ```
 
-Before the first experimental flash on a physical Watcher, inspect and preserve its factory flash:
-
-```powershell
-.\tools\esp32s3\inspect-device.ps1 -Port COM14
-.\tools\esp32s3\backup-flash.ps1 -Port COM14
-```
-
-Then flash a previously verified build and monitor it:
+Then flash the verified **application only** and monitor it:
 
 ```powershell
 .\tools\esp32s3\flash.ps1 -Port COM14
 .\tools\esp32s3\monitor.ps1 -Port COM14
 ```
+
+`flash.ps1` defaults to `factory_firmware` and uses ESP-IDF's generated `flash_app_args`, avoiding normal bring-up rewrites of the bootloader, partition table, and factory-data partition.
 
 Build/flash/backup evidence is stored under `artifacts/` and ignored by Git.
 
@@ -116,12 +119,12 @@ The first milestone is not a custom feature. It is a controlled, traceable known
 
 1. bootstrap the required host environment(s);
 2. validate dependency versions and source revisions;
-3. build unmodified upstream firmware;
-4. preserve exact generated artifacts and SHA-256 evidence;
-5. inspect and back up the factory ESP32-S3 flash before modification;
-6. flash one exact artifact set and record what reached the hardware;
+3. inspect the physical Watcher and preserve critical factory data;
+4. build unmodified upstream firmware;
+5. preserve exact generated artifacts and SHA-256 evidence;
+6. flash only the intended artifact/partition and record what reached the hardware;
 7. boot the Watcher and validate the relevant camera/UI/audio/host interfaces;
 8. pin the exact upstream revision that passed hardware validation;
 9. only then begin pibbi-specific firmware changes.
 
-This keeps host-tool risk, vendor-integration risk, hardware bring-up risk, and pibbi application changes separated enough to debug independently.
+This keeps host-tool risk, vendor-integration risk, hardware bring-up risk, factory-data risk, and pibbi application changes separated enough to debug independently.
