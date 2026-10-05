@@ -54,20 +54,20 @@ Use pibbi wrappers instead of invoking the vendor flow manually:
 
 `build.ps1` performs a clean upstream build with the pinned local toolchain, validates the expected ELF, records build provenance under `artifacts/`, and restores the vendor SDK's known build-generated changes to tracked prebuilt `.a` archives.
 
-`image.ps1` verifies that ELF against the build manifest, exports the image-generator files from the exact SDK commit into an isolated staging directory, runs the upstream Windows image generator there, and records the resulting `output.img` plus its provenance under `artifacts/`. The live vendor checkout remains untouched.
+`image.ps1` verifies that ELF against the build manifest, exports the image-generator files from the exact SDK commit into an isolated staging directory, runs the upstream Windows image generator there, and records each resulting signed `output.img` as a run-specific artifact with its exact SHA-256 and provenance. The live vendor checkout remains untouched. The current upstream secure-boot flow is not assumed to produce byte-identical signed images across repeated runs with the same inputs.
 
 See [`tools/hx6538/README.md`](tools/hx6538/README.md) for details.
 
 ## Bring-up policy
 
-The first milestone is not a custom feature. It is a reproducible known-good baseline:
+The first milestone is not a custom feature. It is a controlled, traceable known-good baseline:
 
 1. bootstrap a clean host environment;
 2. build the unmodified upstream HX6538 example;
-3. generate the HX6538 firmware image;
-4. flash and boot it on the Watcher;
-5. validate the camera and host interface;
+3. generate and preserve an exact HX6538 firmware image run;
+4. flash that exact image and record its manifest/SHA;
+5. boot it on the Watcher and validate the camera and host interface;
 6. pin the exact validated upstream SDK commit;
 7. only then begin pibbi-specific firmware changes.
 
-This keeps vendor integration risk separate from application-development risk.
+This keeps vendor integration risk separate from application-development risk while preserving the exact artifact that was validated on hardware.
