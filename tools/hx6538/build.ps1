@@ -109,10 +109,14 @@ Write-Host ("SDK HEAD  : {0}" -f $sdkHead)
 Write-Host ("SDK branch: {0}" -f $sdkBranch)
 Write-Host ''
 
+# PowerShell unwraps function output. An empty result becomes $null unless the
+# call site explicitly array-wraps it. Keep every status snapshot array-shaped
+# so StrictMode-safe .Count checks work for zero, one, or many status entries.
+$initialStatus = @(Get-GitStatusLines -Repository $sdkRoot)
+
 # Upstream rebuilds selected libraries and copies the resulting archives back into
 # tracked prebuilt_libs/gnu/*.a files. Repair only that known build side effect if
 # it is left over from a previous build. Any other SDK modification is a hard stop.
-$initialStatus = Get-GitStatusLines -Repository $sdkRoot
 if ($initialStatus.Count -gt 0) {
     $expectedInitial = @($initialStatus | Where-Object { Test-UpstreamBuildGeneratedArchive -Line $_ })
     $unexpectedInitial = @($initialStatus | Where-Object { -not (Test-UpstreamBuildGeneratedArchive -Line $_) })
@@ -126,7 +130,7 @@ if ($initialStatus.Count -gt 0) {
     Restore-UpstreamBuildGeneratedArchives -Repository $sdkRoot -StatusLines $expectedInitial
 }
 
-$remainingStatus = Get-GitStatusLines -Repository $sdkRoot
+$remainingStatus = @(Get-GitStatusLines -Repository $sdkRoot)
 if ($remainingStatus.Count -ne 0) {
     throw 'SDK working tree is not clean after pre-build repair.'
 }
@@ -165,7 +169,7 @@ if (-not (Test-Path -LiteralPath $elfPath -PathType Leaf)) {
     throw "Build completed without the expected ELF: $elfPath"
 }
 
-$postStatus = Get-GitStatusLines -Repository $sdkRoot
+$postStatus = @(Get-GitStatusLines -Repository $sdkRoot)
 $expectedPost = @($postStatus | Where-Object { Test-UpstreamBuildGeneratedArchive -Line $_ })
 $unexpectedPost = @($postStatus | Where-Object { -not (Test-UpstreamBuildGeneratedArchive -Line $_) })
 
@@ -183,7 +187,7 @@ elseif ($expectedPost.Count -gt 0) {
 }
 
 if (-not $KeepVendorBuildArtifacts) {
-    $finalStatus = Get-GitStatusLines -Repository $sdkRoot
+    $finalStatus = @(Get-GitStatusLines -Repository $sdkRoot)
     if ($finalStatus.Count -ne 0) {
         throw 'SDK working tree is not clean after post-build repair.'
     }
