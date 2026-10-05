@@ -12,7 +12,20 @@ This directory owns reproducible host-side setup for pibbi's HX6538 and ESP32-S3
 - Keep interactive activation scoped to the current PowerShell session.
 - Treat upstream revision changes as explicit dependency upgrades after a known-good hardware baseline is established.
 
-## Aggregate check
+## Aggregate bootstrap and check
+
+Provision both environments:
+
+```powershell
+.\tools\setup\bootstrap.ps1
+```
+
+Or provision one platform:
+
+```powershell
+.\tools\setup\bootstrap.ps1 -Platform hx6538
+.\tools\setup\bootstrap.ps1 -Platform esp32s3
+```
 
 Run both platform checks:
 
@@ -27,7 +40,7 @@ Or select one:
 .\tools\setup\check-env.ps1 -Platform esp32s3
 ```
 
-`check-env.ps1` is only an aggregator. Platform-specific checks remain usable independently.
+The aggregate scripts are orchestration only. Platform-specific bootstrap/check scripts remain usable independently.
 
 ---
 
