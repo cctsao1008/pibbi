@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Port,
-    [UInt64]$SizeBytes = 0
+    [UInt64]$SizeBytes = 0,
+    [int]$Baud = 2000000
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,7 +43,8 @@ $sizeHex = ('0x{0:X}' -f $SizeBytes)
 
 Write-Host ''
 Write-Host "Reading full flash: 0x0 .. $sizeHex"
-& python -m esptool --chip $config.EspIdf.Target --port $Port read_flash 0x0 $sizeHex $flashPath
+Write-Host "Baud: $Baud"
+& python -m esptool --chip $config.EspIdf.Target --port $Port --baud $Baud read_flash 0x0 $sizeHex $flashPath
 if ($LASTEXITCODE -ne 0) {
     throw "Flash backup failed with exit code $LASTEXITCODE"
 }
@@ -57,6 +59,7 @@ $manifest = [ordered]@{
     SchemaVersion = 1
     Platform = 'esp32s3'
     Port = $Port
+    Baud = $Baud
     SizeBytes = $SizeBytes
     Sha256 = $sha256
     BackedUpAtUtc = [DateTime]::UtcNow.ToString('o')
