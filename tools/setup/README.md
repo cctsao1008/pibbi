@@ -92,6 +92,7 @@ Single source of truth for the ESP32-S3 environment. It currently defines:
 - exact ESP-IDF release commit: `a322e6bdad4b6675d4597fb2722eea2851ba88cb`
 - target: `esp32s3`
 - repository-local ESP-IDF tools directory: `.tools/esp-idf`
+- ESP-IDF GitHub release-asset mirror: `dl.espressif.com/github_assets`
 - Seeed `SenseCAP-Watcher-Firmware` tracking branch: `main`
 
 ESP-IDF is pinned immediately because the upstream Watcher firmware explicitly documents `v5.2.1`. The Watcher firmware commit is intentionally left unpinned until one exact revision passes real-hardware build/flash/smoke validation.
@@ -107,11 +108,20 @@ It:
 1. validates Git and Python prerequisites;
 2. clones ESP-IDF recursively and checks out the exact pinned release commit;
 3. sets `IDF_TOOLS_PATH` to `.tools/esp-idf` for provisioning;
-4. uses Espressif's `idf_tools.py` to install the `esp32s3` toolset and ESP-IDF Python environment;
-5. clones `Seeed-Studio/SenseCAP-Watcher-Firmware` recursively;
-6. runs `check-esp32s3-env.ps1`.
+4. sets `IDF_GITHUB_ASSETS` for the provisioning step so large GitHub release assets are downloaded through Espressif's official download server by default;
+5. uses Espressif's `idf_tools.py` to install the `esp32s3` toolset and ESP-IDF Python environment;
+6. clones `Seeed-Studio/SenseCAP-Watcher-Firmware` recursively;
+7. runs `check-esp32s3-env.ps1`.
 
-It does not permanently modify the system/user `PATH` or `IDF_TOOLS_PATH`.
+It does not permanently modify the system/user `PATH`, `IDF_TOOLS_PATH`, or `IDF_GITHUB_ASSETS`; the caller's original environment is restored after provisioning.
+
+The default asset host can be overridden explicitly when needed:
+
+```powershell
+.\tools\setup\bootstrap-esp32s3.ps1 -GitHubAssetsHost 'github.com'
+```
+
+An existing caller-defined `IDF_GITHUB_ASSETS` also takes precedence over the repository default when no command-line override is supplied.
 
 Use `-UpdateWatcher` only when intentionally advancing the still-unpinned Watcher firmware tracking branch. `-Force` removes and reprovisions only the repository-local ESP-IDF tool installation; it does not delete source checkouts.
 
