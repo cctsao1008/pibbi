@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Example = 'helloworld',
+    [string]$Example = 'factory_firmware',
     [switch]$Clean
 )
 
@@ -63,10 +63,10 @@ finally {
 
 $elf = Get-ChildItem -LiteralPath $buildRoot -Filter '*.elf' -File | Select-Object -First 1
 $appBin = Get-ChildItem -LiteralPath $buildRoot -Filter '*.bin' -File | Select-Object -First 1
-$flashArgsPath = Join-Path $buildRoot 'flash_args'
+$flashAppArgsPath = Join-Path $buildRoot 'flash_app_args'
 if (-not $elf) { throw "Build completed but no application ELF was found in $buildRoot" }
 if (-not $appBin) { throw "Build completed but no application BIN was found in $buildRoot" }
-if (-not (Test-Path -LiteralPath $flashArgsPath -PathType Leaf)) { throw "Build completed but flash_args was not found in $buildRoot" }
+if (-not (Test-Path -LiteralPath $flashAppArgsPath -PathType Leaf)) { throw "Build completed but flash_app_args was not found in $buildRoot" }
 
 $manifest = [ordered]@{
     SchemaVersion = 1
@@ -88,7 +88,7 @@ $manifest = [ordered]@{
         Size = $appBin.Length
         Sha256 = (Get-FileHash -LiteralPath $appBin.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     }
-    FlashArgs = 'build\flash_args'
+    FlashAppArgs = 'build\flash_app_args'
 }
 
 $manifestPath = Join-Path $artifactRoot 'build-manifest.json'
