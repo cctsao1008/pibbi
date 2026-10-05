@@ -70,17 +70,30 @@ The image wrapper intentionally does **not** run `we2_local_image_gen.exe` insid
 3. exports `we2_image_gen_local/` from the exact SDK commit with `git archive`;
 4. stages the verified ELF into that isolated copy using the upstream partition JSON;
 5. runs the upstream Windows generator with `project_case1_blp_wlcsp.json`;
-6. validates and copies `output.img` into pibbi's artifact area;
-7. records the generator/config/input/output hashes in `image-manifest.json`.
+6. validates and copies `output.img` into a run-specific artifact directory;
+7. records the SDK/build/generator/config input identity and exact output hash in `image-manifest.json`;
+8. compares the result with prior manifests that used the same validated input set.
 
-Artifacts are written under:
+Artifacts are preserved per generation run:
 
 ```text
-artifacts/hx6538/image/<sdk-short-sha>/
+artifacts/hx6538/image/<sdk-short-sha>/<run-id>/
 ├─ output.img
 ├─ image-manifest.json
 └─ image-gen.log
 ```
+
+This is deliberate. During initial Watcher bring-up, two consecutive runs of the upstream secure-boot image flow used the same SDK revision, ELF, generator, project configuration, and partition configuration, produced the same image size, but produced different `output.img` SHA-256 values. The generator log shows that secure-boot content certificates are regenerated on each run; the exact varying certificate/signature field has not yet been isolated. Therefore pibbi does **not** currently assume byte-for-byte reproducibility of the signed image.
+
+`image-manifest.json` records an `InputSetSha256` for the validated deterministic inputs and a separate SHA-256 for the exact generated image. If a previous run with the same input-set identity produced a different image hash, the wrapper reports `observed-nondeterministic` and emits a warning.
+
+The operational rule is:
+
+- treat the ELF/build inputs as reproducible evidence;
+- treat each signed `output.img` as a run-specific artifact;
+- never overwrite a previous signed image;
+- flash and record the exact image manifest/SHA used on hardware;
+- do not treat a different image SHA alone as evidence of a source-code change.
 
 This isolates image-generation side effects and ignored temporary files from the vendor SDK checkout while preserving provenance back to the exact build ELF and SDK commit.
 
@@ -90,4 +103,4 @@ If image generation fails, the staging directory under `.tools/work/hx6538-image
 .\tools\hx6538\image.ps1 -KeepWorkDir
 ```
 
-The SDK commit should still not be pinned after image generation alone. Pinning waits until the generated image has been flashed to the Watcher and the boot/camera/interface smoke test has passed.
+The SDK commit should still not be pinned after image generation alone. Pinning waits until one exact generated image has been flashed to the Watcher and the boot/camera/interface smoke test has passed. The image manifest and image SHA used for that smoke test should be retained as part of the baseline evidence.
