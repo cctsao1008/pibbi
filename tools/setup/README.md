@@ -140,15 +140,19 @@ Opening a new shell restores the machine's normal environment.
 Checks:
 
 - Git
-- Python and pip
+- bootstrap Python version
+- host `pip` availability as an informational warning only
 - exact ESP-IDF commit
 - ESP-IDF working-tree cleanliness
 - ESP-IDF submodule state
 - repository-local `IDF_TOOLS_PATH`
 - Espressif-managed tool installation through `idf_tools.py check`
+- ESP-IDF managed Python environment and package dependencies
 - target `esp32s3`
 - managed SenseCAP Watcher firmware checkout
 - Watcher revision/pin status and working-tree cleanliness
+
+The ESP32-S3 flow does not require `pip` to be installed into the machine-wide/bootstrap Python after `idf_tools.py install-python-env` has successfully created the ESP-IDF-managed virtual environment. The checker therefore validates the managed interpreter and ESP-IDF package set directly; missing host `pip` is only a warning.
 
 A missing required dependency returns a non-zero exit code. An intentionally unpinned Watcher revision is reported as a warning rather than a failure.
 
