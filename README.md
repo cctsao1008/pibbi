@@ -27,7 +27,14 @@ pibbi/
 
 ## Development environment on Windows
 
-The two firmware sides are intentionally isolated and can be bootstrapped independently.
+Bootstrap both firmware environments from a fresh clone:
+
+```powershell
+.\tools\setup\bootstrap.ps1
+.\tools\setup\check-env.ps1
+```
+
+The two firmware sides can also be provisioned independently.
 
 HX6538:
 
@@ -43,15 +50,11 @@ ESP32-S3:
 .\tools\setup\check-esp32s3-env.ps1
 ```
 
-Check both environments together:
+The aggregate bootstrap/check entry points also accept a platform selector:
 
 ```powershell
-.\tools\setup\check-env.ps1
-```
-
-Or select one platform through the aggregate checker:
-
-```powershell
+.\tools\setup\bootstrap.ps1 -Platform hx6538
+.\tools\setup\bootstrap.ps1 -Platform esp32s3
 .\tools\setup\check-env.ps1 -Platform hx6538
 .\tools\setup\check-env.ps1 -Platform esp32s3
 ```
