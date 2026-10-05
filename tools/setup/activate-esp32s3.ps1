@@ -37,11 +37,22 @@ if (-not (Test-Path -LiteralPath $exportScript -PathType Leaf)) {
     throw "ESP-IDF export script not found: $exportScript"
 }
 
+# ESP-IDF v5.2.1 export.ps1 supports Windows PowerShell 5.1 by probing
+# `$IsWindows` and assigning it when absent. Under pibbi's StrictMode=Latest,
+# merely reading an undefined variable throws before that upstream fallback can
+# run. `$IsWindows` is an automatic variable only in PowerShell Core 6+; when it
+# is genuinely absent we are therefore on Windows PowerShell 5.1 and can safely
+# seed the compatibility value expected by the upstream script.
+if (-not (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue)) {
+    $IsWindows = $true
+}
+
 # ESP-IDF may emit informational stderr while selecting managed tools, for
-# example when a newer unsupported system CMake is present. Windows PowerShell
-# 5.1 promotes native stderr to ErrorRecord; with ErrorActionPreference=Stop
-# that benign message would abort activation. Let the official export script
-# make the tool-selection decision, then restore pibbi's strict error policy.
+# example when a newer unsupported system CMake/Ninja is present. Windows
+# PowerShell 5.1 promotes native stderr to ErrorRecord; with
+# ErrorActionPreference=Stop that benign message would abort activation. Let the
+# official export script make the tool-selection decision, then restore pibbi's
+# strict error policy.
 $savedErrorActionPreference = $ErrorActionPreference
 try {
     $ErrorActionPreference = 'Continue'
