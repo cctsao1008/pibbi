@@ -80,7 +80,6 @@ if (-not (Get-Command 'git' -ErrorAction SilentlyContinue)) {
     throw 'Git is required before bootstrap can continue.'
 }
 
-# Windows PowerShell 5.1 can otherwise negotiate obsolete TLS versions on older hosts.
 if ($PSVersionTable.PSEdition -eq 'Desktop') {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 }
@@ -203,7 +202,7 @@ if ([string]::IsNullOrWhiteSpace($config.SscmaWe2.Commit)) {
 }
 
 Write-Step 'Validate complete HX6538 environment'
-& (Join-Path $PSScriptRoot 'check-env.ps1')
+& (Join-Path $PSScriptRoot 'check-hx6538-env.ps1')
 if ($LASTEXITCODE -ne 0) {
     throw "HX6538 environment validation failed with exit code $LASTEXITCODE"
 }
