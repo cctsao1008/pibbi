@@ -53,6 +53,14 @@ if ($Example -eq 'pibbi') {
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to prepare pibbi-owned vendor overlay (exit $LASTEXITCODE)"
     }
+
+    $externalOverlayTool = Join-Path $repoRoot 'tools\esp32s3\prepare-component-overlays.py'
+    $managedDir = Join-Path $projectRoot 'managed_components'
+    $externalOverlayDir = Join-Path $projectRoot 'vendor_overlay\components'
+    & python $externalOverlayTool --watcher $watcherRoot --managed $managedDir --output $externalOverlayDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to prepare pibbi component overlays (exit $LASTEXITCODE)"
+    }
 }
 
 # idf.py v5.2.1 mirrors Ninja stdout/stderr through Python TextIO.

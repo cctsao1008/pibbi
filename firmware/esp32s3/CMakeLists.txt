@@ -21,3 +21,6 @@ endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(pibbi_watcher)
+
+# Compile selected external sources from pibbi-owned corrected copies.
+include("${CMAKE_CURRENT_LIST_DIR}/pibbi_component_overlays.cmake")
