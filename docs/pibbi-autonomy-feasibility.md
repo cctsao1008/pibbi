@@ -72,3 +72,50 @@ G2: open / no user interactions yet.
 G3: future / no flash authorization.
 
 Continue with direct commits on branch research/hx6538-runtime-baseline-audit-20261015. PR #2 stays closed, no new PR.
+
+
+## Runnable G0 research files and Windows smoke test
+
+- tools/autonomy/core.py: deterministic bounded decision policy; plain goal snapshot, no device I/O.
+- tools/autonomy/replay.py: offline event replay, append-only JSONL decision audit and atomic state update.
+- tests/test_autonomy_core.py: 11 behavior and safety invariants.
+- tests/data/autonomy-sample.jsonl: synthetic two-opportunity case (deferral and completion).
+- Tracking: https://github.com/cctsao1008/pibbi/issues/4
+
+From an already checked-out pibbi **research** branch on Windows:
+
+```powershell
+git pull --ff-only
+py -m unittest discover -s .\tests -p "test_autonomy*.py" -v
+
+$run = ".\artifacts\pibbi\autonomy-g0"
+New-Item -ItemType Directory -Force $run | Out-Null
+
+py .\tools\autonomy\replay.py `
+  --trace .\tests\data\autonomy-sample.jsonl `
+  --goal "Check one unfinished item" `
+  --state "$run\goal-state.json" `
+  --audit "$run\decisions.jsonl"
+```
+
+**Use fresh state and audit paths for each replay**; prior state holds the last timestamp and rejects older events. The sample's intended action sequence is:
+1. 0: request_owner_confirmation
+2. 1: none (duplicate suppressed)
+3. 4: ask_goal_status
+4. 8: record_goal_deferred
+5. 60: none
+6. 1809: request_owner_confirmation
+7. 1810: ask_goal_status
+8. 1811: record_goal_completed
+9. 1900: none (goal already done)
+
+These are **emitted action intents**, not actual notifications or physical actions. The local JSON state holds goal text **in plaintext**; use a dummy goal for public demonstrations and do not commit personal-state/audit files. The synthetic owner_confirmed event is **not** a verified Watcher detection capability. A real user authentication input remains a G2 gate.
+
+The unit tests were run locally before committing equivalent files. The GitHub copies have not yet been independently rerun in the user's Windows checkout. No claim about hardware-in-the-loop behavior is made.
+
+### Related work / novelty restraint
+
+- Bajcsy et al., [Revisiting active perception](https://link.springer.com/article/10.1007/s10514-017-9615-3), Autonomous Robots (2018). The concepts of acting to improve perception and deciding when to sense have established literature.
+- Watcher's native task-triggered alerts are **already** a vendor-provided behavior; our experiment is not to recreate them.
+
+Only a measured difference in interruption load, stale-evidence handling, and goal completion compared to naive event rules on the same trace would justify continued autonomy development; otherwise stop rather than building yet another home-automation rule set.
