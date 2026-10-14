@@ -148,6 +148,50 @@ def correct(rel: str, data: str) -> tuple[str, list[str]]:
                       "access_key", "ai_key", "device_control_key"):
             fix(f"const char *{field};", f"char *{field};")
 
+    # Source-grounded fixes from the 2026-10-14 full clean-build log.
+    # All replacements are asserted against the pinned Seeed revision.
+    if rel == "task_flow_engine/include/tf.h":
+        fix("tf_module_mgmt_t *mgmt_handle;", "const tf_module_mgmt_t *mgmt_handle;", 1)
+        fix("tf_module_mgmt_t *mgmt_handle);", "const tf_module_mgmt_t *mgmt_handle);", 1)
+    elif rel == "task_flow_engine/include/tf_parse.h":
+        fix("tf_module_mgmt_t *mgmt_handle;", "const tf_module_mgmt_t *mgmt_handle;", 1)
+    elif rel == "task_flow_engine/src/tf.c":
+        fix("tf_module_mgmt_t *mgmt_handle)", "const tf_module_mgmt_t *mgmt_handle)", 1)
+    elif rel == "app/app_sensecraft.h":
+        fix("static esp_err_t sensecraft_deviceinfo_get(struct sensecraft_deviceinfo *p_info);\n", "", 1)
+        fix("char *p_module_name,", "const char *p_module_name,", 2)
+        fix("char *taskflow_name,", "const char *taskflow_name,", 1)
+    elif rel == "app/app_sensecraft.c":
+        fix("static const char *TAG = \"sensecaft\";", "static esp_err_t sensecraft_deviceinfo_get(struct sensecraft_deviceinfo *p_info);\nstatic const char *TAG = \"sensecaft\";", 1)
+        fix("char *p_module_name,", "const char *p_module_name,", 2)
+        fix("char *taskflow_name,", "const char *taskflow_name,", 1)
+        fix("char *p_err_module = NULL;", "const char *p_err_module = NULL;", 2)
+    elif rel == "app/app_ota.h":
+        fix("esp_partition_t *partition;", "const esp_partition_t *partition;", 1)
+    elif rel == "app/app_device_info.h":
+        fix("uint8_t *get_bt_mac();", "const uint8_t *get_bt_mac();", 1)
+    elif rel == "app/app_device_info.c":
+        fix("uint8_t *get_bt_mac()", "const uint8_t *get_bt_mac()", 1)
+    elif rel == "data_defs.h":
+        fix("char *fw_version;  //ESP32's firmware", "const char *fw_version;  //ESP32's firmware", 1)
+    elif rel == "app/app_taskflow.c":
+        fix("    char *p_module_name = NULL;", "    const char *p_module_name = NULL;", 2)
+        fix("__taskflow_tid_get(char *p_task_flow,", "__taskflow_tid_get(const char *p_task_flow,", 1)
+    elif rel == "task_flow_module/tf_module_uart_alarm.c":
+        fix("    char *prompt = NULL;", "    const char *prompt = NULL;", 1)
+        fix("free(tf_info.p_tf_name);", "free((void *)tf_info.p_tf_name);", 1)
+    elif rel == "task_flow_module/tf_module_http_alarm.c":
+        fix("free(tf_info.p_tf_name);", "free((void *)tf_info.p_tf_name);", 1)
+    elif rel == "task_flow_module/tf_module_sensecraft_alarm.c":
+        fix("free(tf_info.p_tf_name);", "free((void *)tf_info.p_tf_name);", 1)
+    elif rel == "app/app_voice_interaction.c":
+        fix("            // No need for break", "            __attribute__((fallthrough)); // FINISH intentionally performs STOP cleanup", 1)
+    elif rel == "app/app_rgb.c":
+        fix("static caller_context_t caller_contexts[STACK_SIZE];\n", "", 1)
+        fix("static int stack_top = -1; // Empty stack\n", "", 1)
+        fix("static esp_timer_handle_t rgb_timer_handle;\n", "", 1)
+        fix("static uint8_t flag = 0;\n", "", 1)
+
     # esp_event_post_to's fifth argument is size_t. NULL is a pointer and
     # generates -Wint-conversion; the intended payload length is zero.
     if rel.endswith(".c"):
