@@ -273,6 +273,10 @@ def correct(rel: str, data: str) -> tuple[str, list[str]]:
     elif rel == "task_flow_module/tf_module_img_analyzer.c":
         fix("err:\n    if(p_module_ins->task_handle ) {", "err:\n    ESP_LOGE(TAG, \"image analyzer init failed: %s\", esp_err_to_name(ret));\n    if(p_module_ins->task_handle ) {", 1)
     elif rel == "task_flow_module/tf_module_uart_alarm.c":
+        # ESP_GOTO_ON_ERROR writes ret, while err: is outside the first-instance if.
+        # Keep ret in the enclosing function scope so logging can read it.
+        fix("    p_module_ins->module_base.ops = &__g_module_ops;\n\n    if (atomic_fetch_add(&g_ins_cnt, 1) == 0) {\n        // the 1st time instance, we should init the hardware\n        esp_err_t ret;",
+            "    p_module_ins->module_base.ops = &__g_module_ops;\n    esp_err_t ret = ESP_OK;\n\n    if (atomic_fetch_add(&g_ins_cnt, 1) == 0) {\n        // the 1st time instance, we should init the hardware", 1)
         fix("err:\n    free(p_module_ins);", "err:\n    ESP_LOGE(TAG, \"UART alarm init failed: %s\", esp_err_to_name(ret));\n    free(p_module_ins);", 1)
 
     # Remove unused stub locals; propagate unregister result instead of losing it.
