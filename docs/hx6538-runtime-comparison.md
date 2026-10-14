@@ -560,8 +560,28 @@ Its initialization/allocator latency, success status and system-level fragmentat
 
 ### Closure and next experiment
 
-- **Verified static:** MVE Intel+FP capability; 168+ vectorized opcode sites in specific kernel; vectorized gather/scatter and stack vector load/store; documented output-width restriction; current 160-width call satisfies contract; 320 B \`calloc/free\` per resize; linked TFLM/Ethos-U driver path.
+- **Verified static:** MVE Integer+FP capability; 168+ vectorized opcode sites in specific kernel; vectorized gather/scatter and stack vector load/store; documented output-width restriction; current 160-width call satisfies contract; 320 B \`calloc/free\` per resize; linked TFLM/Ethos-U driver path.
 - **Still unverified:** boot execution, image-output correctness, pointer memory safety outside documented API contract, cache/bus stall cycles, real vector speedup, allocation latency, total preprocessing vs NPU elapsed time.
 - **Next:** choose *instrumentation boundaries* for resize, quantization/copy, face-detection Invoke, postprocessing, face alignment, embedding Invoke. Create a no-flash benchmark design referencing stable Native symbols, buffer lifetimes and cache-maintenance boundaries. Do not compare unrelated SSCMA SDK revision to Native for framework overhead.
 
 **Project policy:** continue with direct commits to the isolated research branch and [Issue #3](https://github.com/cctsao1008/pibbi/issues/3). Keep PR #2 closed; do not open another PR, merge, generate signed flash images, or modify the factory firmware/Native SDK.
+
+
+### Reproducible read-only MVE instruction audit tool
+
+Committed `tools/hx6538/audit-native-mve.py` on the **research branch** (Python 3.8+). The tool reads the original GNU objdump text, counts explicit Q-register instructions, and optionally reconstructs suspect instruction halfwords inside an ephemeral assembled object for an MVE-aware LLVM disassembler. It does not change SDK files, generate images, or access hardware.
+
+From the repo root after `git pull --ff-only`:
+
+```powershell
+$input = '.\artifacts\hx6538\analysis\native-isa\native-disassembly.txt'
+$output = '.\artifacts\hx6538\analysis\native-isa\mve-audit.json'
+
+py .\tools\hx6538\audit-native-mve.py --disassembly $input --output $output
+
+# Optional when MVE-capable LLVM clang + llvm-objdump are installed:
+py .\tools\hx6538\audit-native-mve.py --disassembly $input --output $output `
+  --clang clang --llvm-objdump llvm-objdump
+```
+
+Expected uploaded reference: 417 parsed instruction lines, 94 explicit Q-register sites, 74 GNU ambiguous sites; with LLVM, 74/74 decoded and lower bound **168**. Without LLVM, all 74 suspects intentionally remain **UNRESOLVED**. The original disassembly text SHA-256 is `4502ef797f98902d18b0d9b626066d40005082c28fa8e5142b2332d762f764c4`; it is not the ELF manifest SHA-256.
