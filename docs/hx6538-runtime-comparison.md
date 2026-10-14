@@ -255,7 +255,7 @@ Legacy app source `sscma.cpp` creates the initial FreeRTOS task with depth 20480
 
 ## 2026-10-15: Windows SSCMA ELF/MAP audit result (user-provided report)
 
-Evidence: the user ran `tools/hx6538/analyze-sscma-memory.py` over run `20261014T212931104Z-ad823da6`; tool confirmed **ELF/MAP SHA-256 VERIFIED** against the preserved build manifest and produced `memory-report.md`. The report has been inspected, but raw `objdump-sections.txt` / `readelf-program-headers.txt` have **not** been independently inspected here.
+Evidence: the user ran `tools/hx6538/analyze-sscma-memory.py` over run `20261014T212931104Z-ad823da6`; tool confirmed **ELF/MAP SHA-256 VERIFIED** against the preserved build manifest and produced `memory-report.md`. The memory report was inspected first; a subsequent audit also inspected the user's original `objdump-sections.txt` and `readelf-program-headers.txt`.
 
 **Heap symbol attribution now verified at ELF level:**
 
@@ -266,7 +266,7 @@ Evidence: the user ran `tools/hx6538/analyze-sscma-memory.py` over run `20261014
 | `set_model()::tensor_arena` | `0x3002D0F8` | 4 B | APP_DATA (`static` arena pointer; **not** a second arena) |
 | `guard variable for set_model()::tensor_arena` | `0x3002D0F4` | 4 B | APP_DATA (static-initialization guard; **not** a pool) |
 
-The 1482752 B `.ucHeap + .elHeap` static reservations plus the `27432 B` ordinary `.bss` match **1510184 B** of the previously reported `size` total `bss=1510191`; remaining **7 B** are section-accounting differences requiring raw `size -A` / section enumeration, not a 7 B runtime allocation claim.
+The 1482752 B `.ucHeap + .elHeap` static reservations plus the `27432 B` ordinary `.bss` match **1510184 B** of the previously reported `size` total `bss=1510191`; the remaining **7 B are now accounted for** as `.persistent` (3 B) and `.jcr` (4 B), both reported `ALLOC` without `CONTENTS` in `objdump -h`.
 
 **APP_DATA section addresses from the verified user's report** (intervals end-exclusive):
 
@@ -274,7 +274,7 @@ The 1482752 B `.ucHeap + .elHeap` static reservations plus the `27432 B` ordinar
 |---|---|---:|---|
 | `.text.ext` | `0x30000000–0x30022F88` | 143240 | code routed to APP_DATA |
 | `.rodata` | `0x30022F88–0x300292A9` | 25377 | constants |
-| padding | `0x300292A9–0x300292B0` | 7 | alignment gap |
+| `.persistent` and `.jcr` | `0x300292A9–0x300292B0` | 3 + 4 | `ALLOC` sections with no `CONTENTS` (not generic padding) |
 | `.data` | `0x300292B0–0x30029D08` | 2648 | initialized data |
 | padding | `0x30029D08–0x30029D20` | 24 | alignment gap |
 | `.bss` | `0x30029D20–0x30030848` | 27432 | ordinary static BSS |
@@ -290,3 +290,36 @@ The audit's `File-backed=True` column is derived from GNU objdump section **CONT
 Other measured symbol examples: `edgelab::DeviceWE2::init()::spi` 4372 B at `0x3002F3E4`, `edgelab::porting::_buf_tx` 4095 B at `0x3002BCB0`, and `uxTimerTaskStack.0` 2048 B at `0x3002A128`. Code symbol `hx_drv_pmu_get_ctrl` is 4020 B at `0x30010EF8` (APP_DATA `.text.ext`); large code symbols are **not** RAM dynamic-allocation evidence. `tflite::OpsResolver::OpsResolver()` appears duplicated at the same address/size in the top symbol list and must not be double counted.
 
 **Decision:** static heap ownership is established; no evidence of runtime OOM, heap high-water, stack peak, boot success, MVE cycles, NPU throughput or framework overhead. Next evidence gate should check original `objdump-sections.txt` + `readelf-program-headers.txt` and map the linker-controlled sections against fixed-address camera/JPEG/DMA buffers. Do not edit the independently verified Native baseline, merge the Draft PR or flash the Watcher.
+
+## 2026-10-15: Follow-up ELF PT_LOAD / objdump inspection (user provided both raw reports)
+
+The previous 7-byte BSS discrepancy is **fully resolved** using the actual section flags: `.persistent` 3 B and `.jcr` 4 B are both `ALLOC` but have no `CONTENTS` flag. They are **not** a 7-byte generic padding gap. Recomputed GNU `arm-none-eabi-size` groups:
+
+| size group | Exact section membership | Bytes |
+|---|---|---:|
+| text | `.table` 1984 + `.text.ext` 143240 + `.text` 205396 + `.rodata` 25377 + `.ARM.exidx` 8 | 376005 |
+| data | `.data` 2648 + `.copy.table` 16 + `.zero.table` 12 | 2676 |
+| bss | `.elHeap` 1138688 + `.ucHeap` 344064 + `.bss` 27432 + `.persistent` 3 + `.jcr` 4 | 1510191 |
+| total | | 1888872 |
+
+`readelf -W -l` verifies ELF `EXEC`, entry `0x10001BC5`, one `EXIDX` header (not separately double-counted), and **four** `PT_LOAD` segments:
+
+| PT_LOAD | VirtAddr = PhysAddr | FileSiz (B) | MemSiz (B) | Flags | Sections |
+|---|---|---:|---:|---|---|
+| #1 | `0x10000000` | 207416 | 207416 | RWE | `.table .noinit .text .ARM.exidx .copy.table .zero.table` |
+| #2 | `0x30000000` | 171272 | 198728 | RWE | `.text.ext .rodata .persistent .data .bss .jcr` |
+| #3 | `0x34000000` | 0 | 344064 | RW | `.ucHeap` |
+| #4 | `0x34054000` | 0 | 1138688 | RW | `.elHeap` |
+
+- `PT_LOAD FileSiz` sum is **378688 B**; `PT_LOAD MemSiz` sum is **1888896 B**; the memory-only difference is **1510208 B**. The 24 B difference between total MemSiz and the original GNU `size` total is APP_DATA alignment before `.bss`. The 7 B difference between FileSiz sum and GNU `text+data` is the intervening `.persistent + .jcr` address span, with `ALLOC` but no `CONTENTS`; *neither difference is a memory leak*.
+- `.ucHeap` and `.elHeap` each have a `PT_LOAD` with `FileSiz=0`, meaning no preinitialized file payload for those large buffers. These are ELF memory-initialization requirements. Do **not** assert that the actual HX6538 loader performs standard ELF zero-fill without auditing the secure-image packaging and the real startup/loader paths.
+- `.heap` and `.stack` have `CONTENTS` but **no** `ALLOC` flag; neither appears in Section-to-Segment mapping. They are linker `COPY` sections outside all `PT_LOAD`, notwithstanding their placement in the raw ELF file. Their nominal ranges remain reserved by `__HeapBase/Limit` and `__StackLimit/Top`.
+- `PT_LOAD` flags include RWE for ROM and APP_DATA. These are **ELF program-header metadata**, not a verified MPU/TrustZone permission configuration.
+- VMA=PAddr in all `PT_LOAD` headers; this alone does not establish the on-device flash offsets, signed image size, actual boot-copy actions or correctness of zero-init.
+- The `watcher.ld` source-defined `.zero.table` only lists `.bss` and `.copy.table` only lists `.data`. The build selects `HX_TFM=ON`; the publicly visible `device/startup_WE2_ARMCM55.cc` Reset_Handler is conditional on `!HX_TFM`, so it cannot be assumed to be this ELF's effective reset/initialization sequence. The correct follow-up is *read-only* symbol/build provenance inspection for Reset_Handler, TF-M/2nd loader, and the secure image generator.
+
+### Next evidence gate — startup/loader provenance, still no flash
+
+Find the actual `Reset_Handler`, `__PROGRAM_START`, and startup object origin in the original ELF/MAP; trace whether the secure boot image generator serializes the VMA-defined buffers or instead packages only file-backed sections and leaves boot RAM initialized by hardware/firmware. Confirm cold/warm boot zero and retention ownership **before** reasoning about PMU/DVFS/retention. Do not use ELF FileSiz sum as the exact flash-image length or link PT_LOAD RWE flags to live security permissions.
+
+The research branch also extends the read-only `analyze-sscma-memory.py` parser so a **future rerun** writes `PT_LOAD` section mapping into both `memory-report.json` and `memory-report.md`. The program-header parser was checked against the original submitted `readelf-program-headers.txt` fixture; re-execution on Windows remains pending.
