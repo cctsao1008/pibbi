@@ -46,7 +46,12 @@ idf_component_get_property(pibbi_watcher_lib sensecap-watcher COMPONENT_LIB)
 if(NOT TARGET "${pibbi_watcher_lib}" OR NOT TARGET idf::esp_lvgl_port)
     message(FATAL_ERROR "pibbi: sensecap-watcher or esp_lvgl_port component missing")
 endif()
+# The component target belongs to another CMake directory; CMP0079 permits
+# adding its link interface here. Scope the policy to this one override.
+cmake_policy(PUSH)
+cmake_policy(SET CMP0079 NEW)
 target_link_libraries("${pibbi_watcher_lib}" PUBLIC idf::esp_lvgl_port)
+cmake_policy(POP)
 
 set(pibbi_comp_overlay "${CMAKE_CURRENT_LIST_DIR}/vendor_overlay/components")
 pibbi_override_component_source(
