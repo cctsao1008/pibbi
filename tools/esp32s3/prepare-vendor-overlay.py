@@ -29,8 +29,8 @@ def remove_dead_static_function(data: str, name: str) -> str:
     Only a single-line static function declaration with a brace-delimited
     body ending at column zero is accepted. Refuse upstream drift.
     """
-    pattern = (r"(?ms)^static[^;\\n]*\\b" + re.escape(name)
-               + r"\\s*\\([^;]*?\\)\\s*\\{.*?^\\}\\n?")
+    pattern = (r"(?ms)^static[^;\n]*\b" + re.escape(name)
+               + r"\s*\([^;]*?\)\s*\{.*?^\}\n?")
     updated, count = re.subn(pattern, "", data)
     if count != 1:
         raise RuntimeError(f"Expected one unused static C function {name}, got {count}")
