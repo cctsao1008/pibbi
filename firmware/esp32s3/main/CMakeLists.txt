@@ -36,7 +36,6 @@ idf_component_register(
         "${TASK_FLOW_ENGINE_DIR}/include"
         "${TASK_FLOW_MODULE_DIR}"
         "${TASK_FLOW_MODULE_DIR}/common"
-    REQUIRES pibbi_sensors
 )
 
 # Redirect just the app_sensor_init call in upstream main.c to our
