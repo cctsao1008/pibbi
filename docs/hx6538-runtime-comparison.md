@@ -252,3 +252,41 @@ The `el_config_porting.h` definitions `SSCMA_SHARED_BASE64_BUFFER_BASE` / `_SIZE
 Legacy app source `sscma.cpp` creates the initial FreeRTOS task with depth 20480; `sscma/main_task.hpp` creates the listener with depth 4096, then deletes the initial task. `sscma/definations.hpp`, `sscma/static_resource.hpp` and `sscma/repl/supervisor.hpp` configure/create an executor task with depth 20480 and supervisor depth 6144. The NTZ ARM M55 FreeRTOS port typedefs `StackType_t` to `uint32_t`, so stack **requests** are respectively 80, 16, 80 and 24 KiB. If all four are briefly allocated during the handoff, the stack requests total 200 KiB (plus TCB, fragmentation and other allocations); after the initial app task has actually been reclaimed, the three remaining requests total 120 KiB. This is a source-level budget, **not** evidence of actual boot execution or measured peak heap usage. The runtime allocation/reclamation timing has not been observed.
 
 **Next gate remains unchanged:** run the verified ELF/MAP analyzer on the actual Windows build, reconcile linker sections with fixed-address source-defined buffers, and only then plan hardware-level M55/Helium/Ethos-U55 benchmarking. Do not merge or flash.
+
+## 2026-10-15: Windows SSCMA ELF/MAP audit result (user-provided report)
+
+Evidence: the user ran `tools/hx6538/analyze-sscma-memory.py` over run `20261014T212931104Z-ad823da6`; tool confirmed **ELF/MAP SHA-256 VERIFIED** against the preserved build manifest and produced `memory-report.md`. The report has been inspected, but raw `objdump-sections.txt` / `readelf-program-headers.txt` have **not** been independently inspected here.
+
+**Heap symbol attribution now verified at ELF level:**
+
+| Symbol | VMA | ELF symbol size | Linker output |
+|---|---|---:|---|
+| `ucHeap` | `0x34000000` | 344064 B | `.ucHeap`, CM55M_S_SRAM |
+| `el_aligned_malloc_once::elHeap` | `0x34054000` | 1138688 B | `.elHeap`, CM55M_S_EL_ALLOC |
+| `set_model()::tensor_arena` | `0x3002D0F8` | 4 B | APP_DATA (`static` arena pointer; **not** a second arena) |
+| `guard variable for set_model()::tensor_arena` | `0x3002D0F4` | 4 B | APP_DATA (static-initialization guard; **not** a pool) |
+
+The 1482752 B `.ucHeap + .elHeap` static reservations plus the `27432 B` ordinary `.bss` match **1510184 B** of the previously reported `size` total `bss=1510191`; remaining **7 B** are section-accounting differences requiring raw `size -A` / section enumeration, not a 7 B runtime allocation claim.
+
+**APP_DATA section addresses from the verified user's report** (intervals end-exclusive):
+
+| Item | Address interval | Bytes | Interpretation |
+|---|---|---:|---|
+| `.text.ext` | `0x30000000–0x30022F88` | 143240 | code routed to APP_DATA |
+| `.rodata` | `0x30022F88–0x300292A9` | 25377 | constants |
+| padding | `0x300292A9–0x300292B0` | 7 | alignment gap |
+| `.data` | `0x300292B0–0x30029D08` | 2648 | initialized data |
+| padding | `0x30029D08–0x30029D20` | 24 | alignment gap |
+| `.bss` | `0x30029D20–0x30030848` | 27432 | ordinary static BSS |
+| `.heap` COPY | `0x30030848–0x30034848` | 16384 | linker-reserved heap |
+| unassigned interval | `0x30034848–0x3003DFE0` | 38808 | linker gap, **not proven allocatable** |
+| `.stack` COPY | `0x3003DFE0–0x3003FFE0` | 8192 | linker-reserved stack |
+| end guard / tail | `0x3003FFE0–0x30040000` | 32 | linker end tail |
+
+`CM55M_S_APP_DATA` region capacity is 262144 B. Original GNU region report was **198728 B** (75.81%) and the analyzer's sum of ELF `ALLOC` sections is **198704 B**; their 24 B difference reflects that the two metrics use different accounting, and coincides with the `.data`→`.bss` 24 B alignment gap. **Neither of those numbers accounts as usable memory for the separate 16384 B `.heap` plus 8192 B `.stack` reservation.** Once reported `ALLOC` sections, those two COPY reservations and the 24 B accounting difference are counted, `223304 B` (85.18%) of APP_DATA is occupied or reserved and `38840 B` appears in unassigned address spans (38808 B contiguous plus 32 B tail). This is **a static address-map budget only**, not available C heap, a guaranteed safe relocation area, or measured free runtime heap.
+
+The audit's `File-backed=True` column is derived from GNU objdump section **CONTENTS**, **not** from `SHF_ALLOC` / ELF `PT_LOAD`. In particular, COPY `.heap/.stack` are listed with `CONTENTS=True` while excluded from `ALLOC` sums; do not call them flash-image bytes without examining raw `readelf -W -S` and `readelf -W -l` and the signed-image generator's boot mapping. The report shows VMA=LMA for the listed sections, which **does not establish** runtime boot copies or signed-image size.
+
+Other measured symbol examples: `edgelab::DeviceWE2::init()::spi` 4372 B at `0x3002F3E4`, `edgelab::porting::_buf_tx` 4095 B at `0x3002BCB0`, and `uxTimerTaskStack.0` 2048 B at `0x3002A128`. Code symbol `hx_drv_pmu_get_ctrl` is 4020 B at `0x30010EF8` (APP_DATA `.text.ext`); large code symbols are **not** RAM dynamic-allocation evidence. `tflite::OpsResolver::OpsResolver()` appears duplicated at the same address/size in the top symbol list and must not be double counted.
+
+**Decision:** static heap ownership is established; no evidence of runtime OOM, heap high-water, stack peak, boot success, MVE cycles, NPU throughput or framework overhead. Next evidence gate should check original `objdump-sections.txt` + `readelf-program-headers.txt` and map the linker-controlled sections against fixed-address camera/JPEG/DMA buffers. Do not edit the independently verified Native baseline, merge the Draft PR or flash the Watcher.
