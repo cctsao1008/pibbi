@@ -120,7 +120,7 @@ def parse_program_headers(output):
             in_mapping = True
             continue
         if in_mapping:
-            m = re.match(r"^\\s*(\\d+)\\s+(.*)$", line)
+            m = re.match(r"^\s*(\d+)\s+(.*)$", line)
             if m:
                 mapping[int(m.group(1))] = m.group(2).split()
             continue
