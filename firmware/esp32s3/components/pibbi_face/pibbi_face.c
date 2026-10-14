@@ -10,7 +10,7 @@
 #define PIBBI_FACE_TAP_HAPPY_MS   1800U
 
 /* Warm, flat colors from the approved minimal 2D white-bear direction. */
-#define PIBBI_COLOR_BG        0xF7EEE4
+#define PIBBI_COLOR_BG        0x313A46
 #define PIBBI_COLOR_WHITE     0xFFFDF9
 #define PIBBI_COLOR_EAR       0xF6D0CB
 #define PIBBI_COLOR_MUZZLE    0xFFF8F1
@@ -253,6 +253,7 @@ bool pibbi_face_attach(lv_obj_t *home_screen)
     lv_obj_set_style_shadow_width(s_face.return_button, 0, LV_PART_MAIN);
     lv_obj_t *label = lv_label_create(s_face.return_button);
     lv_label_set_text(label, "pibbi");
+    lv_obj_set_style_text_color(label, lv_color_hex(PIBBI_COLOR_WHITE), LV_PART_MAIN);
     lv_obj_center(label);
     lv_obj_add_flag(s_face.return_button, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(s_face.return_button, return_to_face, LV_EVENT_CLICKED, NULL);
