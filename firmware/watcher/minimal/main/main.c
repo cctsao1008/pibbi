@@ -85,6 +85,41 @@ static esp_err_t pca9535_read_input(uint16_t *out)
     return rc;
 }
 
+static esp_err_t watcher_park_external_io(void)
+{
+    /*
+     * The original bsp_i2c_bus_init() parks LCD/QSPI and touch pins LOW
+     * before enabling power rails. Preserve this board-specific electrical
+     * sequencing in B1a even though there is no LCD/touch driver yet.
+     */
+    const gpio_config_t config = {
+        .pin_bit_mask = (1ULL << GPIO_NUM_39) | (1ULL << GPIO_NUM_38) |
+                        (1ULL << GPIO_NUM_7) | (1ULL << GPIO_NUM_9) |
+                        (1ULL << GPIO_NUM_1) | (1ULL << GPIO_NUM_14) |
+                        (1ULL << GPIO_NUM_13) | (1ULL << GPIO_NUM_45) |
+                        (1ULL << GPIO_NUM_8),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    esp_err_t rc = gpio_config(&config);
+    if (rc != ESP_OK) {
+        return rc;
+    }
+    const gpio_num_t pins[] = {
+        GPIO_NUM_39, GPIO_NUM_38, GPIO_NUM_45, GPIO_NUM_8,
+        GPIO_NUM_7, GPIO_NUM_9, GPIO_NUM_1, GPIO_NUM_14, GPIO_NUM_13
+    };
+    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); ++i) {
+        rc = gpio_set_level(pins[i], 0);
+        if (rc != ESP_OK) {
+            return rc;
+        }
+    }
+    return ESP_OK;
+}
+
 static esp_err_t watcher_i2c_init(void)
 {
     const i2c_config_t config = {
@@ -150,6 +185,8 @@ void app_main(void)
     boot_mark("APP_ENTER");
 
     /* Critical boot path: no LVGL, audio, Wi-Fi, BLE, cloud, OTA, or NPU. */
+    ESP_ERROR_CHECK(watcher_park_external_io());
+    boot_mark("EXTERNAL_IO_PARKED");
     ESP_ERROR_CHECK(watcher_i2c_init());
     boot_mark("I2C_READY");
 
