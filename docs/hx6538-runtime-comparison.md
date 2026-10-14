@@ -377,3 +377,38 @@ arm-none-eabi-objdump -d -C --disassemble=_start $elf
 ```
 
 Confirm table loops, branch to `_start`, what C Runtime initializes, and whether either entry path touches the two fixed SRAM pools. No source changes or target access. Keep Native and original Watcher firmware untouched.
+
+## 2026-10-15: Instruction-level startup verification (user-provided ELF disassemblies)
+
+Artifacts: `reset-handler-disasm.txt` (actual instructions) and `crt-start-disasm.txt` (header-only, no instruction listing), produced read-only from the verified historical SSCMA ELF `20261014T212931104Z-ad823da6`.
+
+### Final linked `Reset_Handler` instruction path — VERIFIED in ELF
+
+| Address or range | Observed instructions | Proven meaning |
+|---|---|---|
+| `0x10001BC4–0x10001BD2` | `msr MSP`, `msr MSPLIM`, `bl 0x1000181C <SystemInit>` | stack registers and system-init call |
+| `0x10001BD6–0x10001CCC` | register accesses based at `0xE000ED00`, `dsb/isb`, `dls/le` loops | Cortex-M55 cache maintenance; DLS/LE are low-overhead-loop instructions **not proof of SIMD MVE acceleration** |
+| `0x10001CD0–0x10001D02` | table bounds + `ldr.w`/`str.w` copy loop | CMSIS copy-table processing **is compiled into the executable** |
+| `0x10001D04–0x10001D42` | `movs r4, #0`, table loop, `str.w r4` | CMSIS zero-table processing **is compiled into the executable** |
+| `0x10001D44` | `bl 0x100013C0 <_mainCRTStartup>` | direct call into GCC crt0 entry |
+
+Embedded literal values at `0x10001D54/58/5C/60` are exactly `0x10032A20`, `0x10032A2C`, `0x10032A30`, `0x10032A38`, corresponding to the actual linked copy/zero start/end symbols. With the previously decoded table contents, this executable's CMSIS code operates on the same `.data` 2648 B (source = destination, hence copies bytes onto themselves) and ordinary `.bss` 27432 B ranges.
+
+**Strict evidence statement:** final instructions and control-flow **path exist**; no boot of a custom image has been performed, so this does not prove startup executed on actual Watcher hardware. Neither table references the separate `.ucHeap` 344064 B or `.elHeap` 1138688 B pools. Their reset-time zeroing/reliance on earlier loader initialization remains **OPEN**. FreeRTOS heap metadata initialization and the SSCMA model callback's arena clear are separate mechanisms.
+
+### Why `crt-start-disasm.txt` was empty
+
+`arm-none-eabi-objdump -d -C --disassemble=_start` emitted just section headers, so **it did not inspect crt0 instructions**. The MAP resolves `_start` and `_mainCRTStartup` at the same entry address `0x100013C0`; GNU objdump displays `_mainCRTStartup` at the Reset_Handler callsite. A symbol-name filter can miss an address shared by multiple aliases; an empty disassembly is **not** proof of absent code, corrupted CRT, or no BSS initialization.
+
+Next host-only targeted disassembly (address range, not symbol filter):
+
+```powershell
+$run = '.\\artifacts\\hx6538\\build-sscma-legacy\\20261014T212931104Z-ad823da6'
+$elf = "$run\\sscma-watcher.elf"
+arm-none-eabi-objdump -d -C --start-address=0x100013b8 --stop-address=0x10001434 $elf |
+  Out-File "$run\\crt0-address-disasm.txt"
+```
+
+Then inspect `_mainCRTStartup` and the transition to `main` / `__libc_init_array`. Keep the linker/ELF evidence gate **COMPLETE** but physical boot/secure-loader zeroing, cold/warm reset behavior, runtime heap high-water, M55/MVE performance and NPU performance **NOT VERIFIED**.
+
+No new firmware build, signed image, device I/O or flash is required for this step.
