@@ -31,7 +31,6 @@ idf_component_register(
         ${TASK_FLOW_ENGINE_SRCS}
         ${TASK_FLOW_MODULE_SRCS}
         "pibbi_startup.c"
-    REQUIRES pibbi_face
     INCLUDE_DIRS
         "."
         "${WATCHER_MAIN}"
