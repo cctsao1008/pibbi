@@ -1,7 +1,12 @@
 # Reuse upstream Seeed sources without editing the vendor checkout.
 get_filename_component(PIBBI_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 set(WATCHER_FACTORY "${PIBBI_ROOT}/third_party/SenseCAP-Watcher-Firmware/examples/factory_firmware")
-set(WATCHER_MAIN "${WATCHER_FACTORY}/main")
+# The build wrapper creates an ignored corrected copy of upstream sources.
+# Original third_party/ checkouts are never modified.
+set(WATCHER_MAIN "${PIBBI_ROOT}/firmware/esp32s3/vendor_overlay/main")
+if(NOT EXISTS "${WATCHER_MAIN}/main.c")
+    message(FATAL_ERROR "pibbi vendor overlay missing: run tools/esp32s3/build.ps1")
+endif()
 
 set(APP_DIR "${WATCHER_MAIN}/app")
 file(GLOB_RECURSE APP_SRCS "${APP_DIR}/*.c")

@@ -28,3 +28,6 @@ Thumbs.db
 /firmware/esp32s3/sdkconfig.old
 /firmware/esp32s3/dependencies.lock
 /firmware/esp32s3/managed_components/
+
+# Generated, reproducible upstream corrections (no checked-in vendor copies)
+/firmware/esp32s3/vendor_overlay/

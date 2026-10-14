@@ -44,6 +44,17 @@ if ($Clean -and (Test-Path -LiteralPath $buildRoot)) {
 }
 New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
 
+if ($Example -eq 'pibbi') {
+    $prepareOverlay = Join-Path $repoRoot 'tools\esp32s3\prepare-vendor-overlay.py'
+    $upstreamMain = Join-Path $watcherRoot 'examples\factory_firmware\main'
+    $overlayMain = Join-Path $projectRoot 'vendor_overlay\main'
+
+    & python $prepareOverlay --source $upstreamMain --output $overlayMain
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to prepare pibbi-owned vendor overlay (exit $LASTEXITCODE)"
+    }
+}
+
 $oldTarget = $env:IDF_TARGET
 try {
     $env:IDF_TARGET = $config.EspIdf.Target
