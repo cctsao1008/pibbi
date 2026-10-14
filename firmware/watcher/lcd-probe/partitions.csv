@@ -1,0 +1,10 @@
+# Seeed original source reference only, not verified on the physical device.
+# Name, Type, Subtype, Offset, Size, Flags
+nvsfactory, data, nvs, , 200K,
+nvs, data, nvs, , 840K,
+otadata, data, ota, , 0x2000,
+phy_init, data, phy, , 0x1000,
+ota_0, app, ota_0, , 12M,
+ota_1, app, ota_1, , 12M,
+model, data, spiffs, , 1024K,
+storage, data, spiffs, , 6080K,
