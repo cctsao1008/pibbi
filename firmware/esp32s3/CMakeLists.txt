@@ -3,6 +3,14 @@ cmake_minimum_required(VERSION 3.5)
 # Match the Seeed factory project compiler options.
 add_compile_options(-fdiagnostics-color=always -Wno-error=format= -Wno-format)
 
+# Seeed's rlottie component explicitly sets LOTTIE_MODULE and LOTTIE_THREAD
+# to OFF before loading its nested CMake 3.3 project. With CMP0077 unset,
+# option(... ON) discards those normal variables, inadvertently enabling the
+# unsupported SHARED image-loader target on ESP32-S3. The NEW policy honors
+# the enclosing component's values, resolving both CMP0077 developer warnings
+# and the SHARED-target platform warning without suppressing diagnostics.
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+
 # esp-sr v1.7.1 runs COMMAND python when packing speech-recognition models.
 # CMake resolves an IMPORTED executable target with that name to its absolute
 # location, avoiding Windows cmd.exe PATH/alias resolution differences.
