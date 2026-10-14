@@ -9,6 +9,7 @@
  * until actual partitions, factory backup, and recovery have been verified.
  */
 #include <inttypes.h>
+#include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
 
