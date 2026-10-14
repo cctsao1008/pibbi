@@ -17,7 +17,7 @@ $legacySha = '37fed7a8e27b9d50f64b6784c3aff7bbf04cf70d'
 $microSha = 'c90065ddd2d763728b0aa24902af9337922b94fb'
 
 function GitRead([string]$directory, [string[]]$options) {
-    $result = (& git -C $directory @options | Out-String).Trim()
+    $result = (& git -C $directory @options | Out-String).TrimEnd()
     if ($LASTEXITCODE -ne 0) { throw "Git command failed in $directory" }
     return $result
 }
@@ -105,7 +105,7 @@ try {
     finally { Pop-Location }
 
     $elf = Join-Path $app $elfRel
-    $map = $elf + '.map'
+    $map = [System.IO.Path]::ChangeExtension($elf, '.map')
     if (-not (Test-Path -LiteralPath $elf -PathType Leaf)) {
         throw "ELF not found after build: $elf"
     }
