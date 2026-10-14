@@ -60,10 +60,8 @@ if ($Example -eq 'pibbi') {
 # UnicodeEncodeError and hides the child process' actual build result.
 # Override Python stream encoding for this invocation, including CMake/Ninja
 # Python subprocesses, without changing the user's global locale.
-# esp-sr v1.7.1 hardcodes "COMMAND python" in its CMake model-packing
-# step. On Windows, CMake runs this via cmd.exe, which may not see the same
-# Python command that PowerShell/idf.py used to activate ESP-IDF.
-# Put the actual ESP-IDF Python interpreter first in the child process PATH.
+# esp-sr's bare COMMAND python is resolved in the project's CMakeLists.txt
+# through an IMPORTED executable target with an absolute interpreter path.
 $pythonEnvRoot = [Environment]::GetEnvironmentVariable('IDF_PYTHON_ENV_PATH', 'Process')
 if ([string]::IsNullOrWhiteSpace($pythonEnvRoot)) {
     throw "ESP-IDF export did not set IDF_PYTHON_ENV_PATH"
@@ -75,17 +73,14 @@ if (-not (Test-Path -LiteralPath $idfPythonExe -PathType Leaf)) {
 
 $oldTarget = [Environment]::GetEnvironmentVariable('IDF_TARGET', 'Process')
 $oldPythonIoEncoding = [Environment]::GetEnvironmentVariable('PYTHONIOENCODING', 'Process')
-$oldPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
 try {
     $env:IDF_TARGET = $config.EspIdf.Target
     $env:PYTHONIOENCODING = 'utf-8'
-    $env:PATH = "$(Split-Path -Parent $idfPythonExe);$oldPath"
 
-    # Test the exact shell used by the esp-sr Ninja custom command.
-    # Fail here instead of recompiling hundreds of objects first.
-    & $env:ComSpec /d /c "python --version"
+    # Check the actual interpreter CMake will inject into ESP-SR's model rule.
+    & $idfPythonExe --version
     if ($LASTEXITCODE -ne 0) {
-        throw "cmd.exe cannot resolve ESP-IDF Python; expected $idfPythonExe"
+        throw "ESP-IDF Python failed to run: $idfPythonExe"
     }
 
     Push-Location $projectRoot
@@ -111,12 +106,6 @@ finally {
     }
     else {
         $env:PYTHONIOENCODING = $oldPythonIoEncoding
-    }
-    if ($null -eq $oldPath) {
-        Remove-Item Env:PATH -ErrorAction SilentlyContinue
-    }
-    else {
-        $env:PATH = $oldPath
     }
 }
 
