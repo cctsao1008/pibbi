@@ -55,9 +55,16 @@ if ($Example -eq 'pibbi') {
     }
 }
 
-$oldTarget = $env:IDF_TARGET
+# idf.py v5.2.1 mirrors Ninja stdout/stderr through Python TextIO.
+# With Windows legacy code page 950, a non-CP950 build message raises
+# UnicodeEncodeError and hides the child process' actual build result.
+# Override Python stream encoding for this invocation, including CMake/Ninja
+# Python subprocesses, without changing the user's global locale.
+$oldTarget = [Environment]::GetEnvironmentVariable('IDF_TARGET', 'Process')
+$oldPythonIoEncoding = [Environment]::GetEnvironmentVariable('PYTHONIOENCODING', 'Process')
 try {
     $env:IDF_TARGET = $config.EspIdf.Target
+    $env:PYTHONIOENCODING = 'utf-8'
     Push-Location $projectRoot
     try {
         idf.py -B $buildRoot build
@@ -75,6 +82,12 @@ finally {
     }
     else {
         $env:IDF_TARGET = $oldTarget
+    }
+    if ($null -eq $oldPythonIoEncoding) {
+        Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:PYTHONIOENCODING = $oldPythonIoEncoding
     }
 }
 
