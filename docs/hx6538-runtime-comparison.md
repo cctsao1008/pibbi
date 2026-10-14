@@ -412,3 +412,30 @@ arm-none-eabi-objdump -d -C --start-address=0x100013b8 --stop-address=0x10001434
 Then inspect `_mainCRTStartup` and the transition to `main` / `__libc_init_array`. Keep the linker/ELF evidence gate **COMPLETE** but physical boot/secure-loader zeroing, cold/warm reset behavior, runtime heap high-water, M55/MVE performance and NPU performance **NOT VERIFIED**.
 
 No new firmware build, signed image, device I/O or flash is required for this step.
+
+## 2026-10-15: GCC crt0 disassembly closes the application startup instruction gate
+
+Evidence: user-provided `crt0-address-disasm.txt` from the **same manifest-verified** legacy SSCMA ELF. Address-ranged disassembly recovered the alias-shared `_mainCRTStartup` entry that a prior `--disassemble=_start` symbol filter missed. No new build/image/flash/device I/O.
+
+| Instruction(s) | Effective behavior | Evidence level |
+|---|---|---|
+| `0x100013C0–0x100013CA` | set `sp` from literal `0x3003FFE0`, call `_stack_init` | linked machine code |
+| `0x100013CE–0x100013DA` | `r1=0`, `r0=0x30029D20`, `r2=0x30030848-0x30029D20=27432`; call `memset` at `0x100317E4` | linked machine code |
+| `0x100013DE–0x100013EC` | check and conditionally invoke two hook function pointers | linked machine code; hooks need no further analysis for memory audit |
+| `0x10001402` | call `__libc_init_array` at `0x100303C4` | linked machine code |
+| `0x1000140A` | call `main` at `0x1001F328` | linked machine code |
+| `0x1000140E` | call `exit` at `0x1002FB48` if `main` returns | linked machine code |
+
+### Repeated clearing of ordinary .bss: VERIFIED STATICALLY
+
+The compiled `Reset_Handler` first iterates `.zero.table`, targeting `0x30029D20–0x30030848` (27432 B). `_mainCRTStartup` **then calls `memset` over that same 27432 B range again**. Thus the normal linked control path performs two BSS zero passes. This establishes **redundant initialization work of one extra 27432-byte clear** at the instruction level; it does **not** establish runtime cycles, measurable startup latency, flash/boot correctness, or a defect requiring immediate patching. We are not changing vendor startup or modifying any baseline firmware.
+
+The CRT disassembly also confirms no direct memset of `.ucHeap` at `0x34000000` (344064 B) or `.elHeap` at `0x34054000` (1138688 B) in its displayed entry path. Their hardware/earlier-loader initialization is still unresolved. `heap_4.c` sets allocator bookkeeping at first allocation; `sscma::callback::set_model` zeroes the requested 1110 KiB tensor arena before model use. Neither proves that the whole pool is zero immediately after reset.
+
+### Gate closure and research direction
+
+- **DONE (ELF static):** linker section layout; ELF PT_LOAD VMA/PAddr; `copy.table` and `zero.table` record values; startup object provenance; disassembled CMSIS loops; disassembled GNU crt0 path; repeated BSS zero accounting.
+- **OPEN (requires loader source or validated HW):** how signed-image boot stages establish APP_DATA VMA contents; initial state of excluded SRAM pools; reset/retention behavior; actual execution/performance of the custom ELF. Do not claim device behavior from static disassembly.
+- **NEXT: Native M55/Helium ISA *static feasibility* audit**, using the independently verified Native ELF without rebuilding or flashing. Record ELF/SDK/toolchain SHA, `readelf -A` attributes, link flags and representative disassembly. Distinguish compiler target configuration and low-overhead-loop `DLS/LE` from genuine MVE SIMD usage (e.g. vector predicate and lane operations). Prepare matched workload and measurement gates afterwards. Do not compare this unmatched historical SSCMA runtime against Native as a framework performance delta.
+
+The startup audit is **CLOSED AT STATIC ELF LEVEL**; hardware/boot/retention validation remains explicitly open.
