@@ -161,7 +161,7 @@ def make_report(run_dir, prefix):
         "Neither linker region occupancy nor ELF BSS size measures runtime heap use or stack high-water.",
         "APP_DATA contains executable .text.ext; do not equate ELF text bytes with APP_ROM usage.",
         "SDK revisions differ for Native vs SSCMA; no cross-framework overhead conclusion is valid.",
-        "COPY linker sections (.heap/.stack) may not appear as allocated ELF sections; inspect MAP and linker symbols.",
+        "COPY linker sections (.heap/.stack) may have GNU objdump CONTENTS but lack ALLOC/PT_LOAD; check ELF program headers before calling them loadable bytes.",
         "VMA/LMA in ELF are not a complete signed flash image or boot-copy validation.",
     ]
     report = {
@@ -186,11 +186,11 @@ def markdown(report):
     for name, x in report["regions"].items():
         lines.append("| {} | {} | {} |".format(name, x["capacity_bytes"], x["section_allocated_bytes_sum"]))
     lines.extend(["", "## Important sections (VMA and LMA)", "",
-                  "| Section | VMA | LMA | Size (B) | Region | File-backed |",
-                  "|---|---|---|---:|---|---|"])
+                  "| Section | VMA | LMA | Size (B) | Region | objdump CONTENTS | objdump ALLOC |",
+                  "|---|---|---|---:|---|---|---|"])
     for s in report["sections"]:
         if s["name"] in IMPORTANT:
-            lines.append("| {name} | {vma} | {lma} | {size_bytes} | {region} | {has_file_contents} |".format(**s))
+            lines.append("| {name} | {vma} | {lma} | {size_bytes} | {region} | {has_file_contents} | {allocated} |".format(**s))
     lines.extend(["", "## Linker MAP output sections (including COPY reservations)", "",
                   "| MAP section | VMA | Size (B) | Region |", "|---|---|---:|---|"])
     for s in report["map_sections"]:
@@ -207,6 +207,36 @@ def markdown(report):
     for k, v in limits["addresses"].items():
         lines.append("- `{}`: {}".format(k, v))
     lines.append("- gap `__StackLimit - __HeapLimit`: {} B".format(limits["heap_to_stack_gap_bytes"]))
+    # Account for COPY reservations separately from ELF ALLOC sections.
+    # Linker --print-memory-usage may stop at the .heap starting address,
+    # whereas the explicitly positioned .stack is near the end of APP_DATA.
+    required = ("__HeapBase", "__HeapLimit", "__StackLimit", "__StackTop")
+    if all(k in limits["addresses"] for k in required):
+        bounds = {k: int(limits["addresses"][k], 16) for k in required}
+        app_region = report["regions"]["CM55M_S_APP_DATA"]
+        origin = int(app_region["origin"], 16)
+        end = int(app_region["end_exclusive"], 16)
+        sections_sum = app_region["section_allocated_bytes_sum"]
+        before_heap = bounds["__HeapBase"] - origin
+        heap_bytes = bounds["__HeapLimit"] - bounds["__HeapBase"]
+        stack_bytes = bounds["__StackTop"] - bounds["__StackLimit"]
+        gap_bytes = bounds["__StackLimit"] - bounds["__HeapLimit"]
+        tail_bytes = end - bounds["__StackTop"]
+        accounting_gap = before_heap - sections_sum
+        if min(before_heap, heap_bytes, stack_bytes, gap_bytes, tail_bytes, accounting_gap) >= 0:
+            reserved = sections_sum + accounting_gap + heap_bytes + stack_bytes
+            lines.extend(["", "## APP_DATA: ALLOC vs linker COPY reservations", "",
+                          "| Item | Bytes |", "|---|---:|",
+                          "| ELF ALLOC sections (sum) | {} |".format(sections_sum),
+                          "| Pre-heap alignment/other difference | {} |".format(accounting_gap),
+                          "| Linker .heap COPY reservation | {} |".format(heap_bytes),
+                          "| Linker .stack COPY reservation | {} |".format(stack_bytes),
+                          "| **Static occupied/reserved** | **{} ({:.2f}%)** |".format(
+                              reserved, 100.0 * reserved / (end - origin)),
+                          "| Gap between heap and stack (not proven allocatable) | {} |".format(gap_bytes),
+                          "| Tail after stack | {} |".format(tail_bytes)])
+            if reserved + gap_bytes + tail_bytes != end - origin:
+                lines.append("**WARNING:** APP_DATA accounting does not reconcile to region capacity.")
     lines.extend(["", "## Largest symbols (not additive due to aliases)", "",
                   "| Symbol | Address | Size (B) | Region |", "|---|---|---:|---|"])
     for s in report["largest_symbols"][:20]:
