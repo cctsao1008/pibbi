@@ -81,8 +81,8 @@ def native_build_evidence(root, sdk_sha):
                 "manifest": str(manifest_path)}
 
 
-def audit(root):
-    sdk = root / "third_party" / "sscma-example-we2"
+def audit(root, sdk_override=None):
+    sdk = (sdk_override or root / "third_party" / "sscma-example-we2").resolve()
     if not sdk.is_dir():
         raise RuntimeError("Missing SDK: {} (run bootstrap-hx6538.ps1)".format(sdk))
 
@@ -158,12 +158,16 @@ def main():
         help="pibbi root (default: inferred from script location)",
     )
     parser.add_argument(
+        "--sdk-root", type=Path,
+        help="Optional isolated SDK checkout/worktree to audit",
+    )
+    parser.add_argument(
         "--output", type=Path,
         help="report JSON destination (default: artifacts/hx6538/analysis)",
     )
     args = parser.parse_args()
     root = args.repo_root.resolve()
-    report = audit(root)
+    report = audit(root, args.sdk_root)
 
     output = args.output
     if output is None:
