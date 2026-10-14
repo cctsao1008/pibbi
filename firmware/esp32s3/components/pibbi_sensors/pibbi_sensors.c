@@ -7,13 +7,18 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "sensecap-watcher.h"
 
 #define PIBBI_SENSOR_POLL_MS   30000
 #define PIBBI_SENSOR_TASK_STACK 3072
 
-/* The Watcher BSP exports this function without declaring it publicly.
- * Reuse its GPIO47/GPIO48 I2C driver, as the upstream sensor service does. */
+/* Watcher BSP: the general-purpose I2C bus is I2C_NUM_0 on GPIO47/48.
+ * Avoid including sensecap-watcher.h: its umbrella header brings unrelated
+ * component headers into pibbi_sensors' compilation requirements. */
+#define PIBBI_WATCHER_I2C_NUM I2C_NUM_0
+
+/* Both functions are implemented by the upstream sensecap-watcher BSP.
+ * bsp_i2c_check is not declared in the vendor's public header. */
+extern esp_err_t bsp_i2c_bus_init(void);
 extern esp_err_t bsp_i2c_check(i2c_port_t i2c_num, uint8_t address);
 
 ESP_EVENT_DEFINE_BASE(PIBBI_SENSOR_EVENTS);
@@ -60,7 +65,7 @@ static void pibbi_sensor_task(void *arg)
     for (;;) {
         uint32_t mask = 0;
         for (size_t i = 0; i < sizeof(s_sensors) / sizeof(s_sensors[0]); ++i) {
-            if (bsp_i2c_check(BSP_GENERAL_I2C_NUM, s_sensors[i].address) == ESP_OK) {
+            if (bsp_i2c_check(PIBBI_WATCHER_I2C_NUM, s_sensors[i].address) == ESP_OK) {
                 mask |= PIBBI_SENSOR_PRESENT(s_sensors[i].id);
             }
         }
