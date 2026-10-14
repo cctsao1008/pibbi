@@ -13,8 +13,8 @@ import re
 import subprocess
 import tempfile
 
-INSN = re.compile(r'^\\s*([0-9a-fA-F]{8}):\\s+((?:[0-9a-fA-F]{4,8}\\s+){1,2})\\s+([A-Za-z][A-Za-z0-9.]*)\\s*(.*)$')
-QREG = re.compile(r'(?<![A-Za-z0-9])q[0-7](?!\\d)', re.I)
+INSN = re.compile(r'^\s*([0-9a-fA-F]{8}):\s+((?:[0-9a-fA-F]{4,8}\s+){1,2})\s+([A-Za-z][A-Za-z0-9.]*)\s*(.*)$')
+QREG = re.compile(r'(?<![A-Za-z0-9])q[0-7](?!\d)', re.I)
 SUSPECT = {'cdp', 'cdp2', 'ldc', 'ldc2', 'stc', 'stc2'}
 
 
@@ -50,7 +50,7 @@ def decode(candidates, clang, llvm):
     with tempfile.TemporaryDirectory(prefix='pibbi-mve-') as tmp:
         s = pathlib.Path(tmp) / 'decode.s'
         o = pathlib.Path(tmp) / 'decode.o'
-        s.write_text('\\n'.join(source) + '\\n', encoding='ascii')
+        s.write_text('\n'.join(source) + '\n', encoding='ascii')
         subprocess.run([clang, '-target', 'thumbv8.1m.main-none-eabi',
                         '-march=armv8.1-m.main+mve.fp', '-mfloat-abi=hard',
                         '-c', str(s), '-o', str(o)], check=True,
@@ -61,13 +61,13 @@ def decode(candidates, clang, llvm):
     seen = {}
     lines = run.stdout.splitlines()
     for i, line in enumerate(lines):
-        found = re.search(r'<mve_(\\d+)>:', line)
+        found = re.search(r'<mve_(\d+)>:', line)
         if not found:
             continue
         index = int(found.group(1))
         if i + 1 >= len(lines):
             raise ValueError('Missing LLVM decode line')
-        opcode = re.match(r'^\\s*[0-9a-f]+:\\s+(?:[0-9a-f]{4}\\s+){1,2}\\s*([a-z][a-z0-9.]*)\\s*(.*)$', lines[i + 1])
+        opcode = re.match(r'^\s*[0-9a-f]+:\s+(?:[0-9a-f]{4}\s+){1,2}\s*([a-z][a-z0-9.]*)\s*(.*)$', lines[i + 1])
         if not opcode or not opcode.group(1).startswith('v'):
             raise ValueError('Non-MVE cross-decode at index {}'.format(index))
         seen[index] = (opcode.group(1), opcode.group(2))
@@ -129,7 +129,7 @@ def main():
     }
     dest = pathlib.Path(args.output)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(report, indent=2) + '\\n', encoding='utf-8')
+    dest.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print('Explicit Q {}, GNU candidates {}, LLVM decoded {}, identified lower bound {}'.format(
         q_count, len(candidates), len(resolved), q_count + len(resolved)))
     print('Report:', dest)
