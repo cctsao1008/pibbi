@@ -63,3 +63,29 @@ git pull --ff-only
 
 This removes the configured build output and recompiles against the
 freshly prepared overlay. It does NOT erase or flash the device.
+
+## pibbi face (v0.1 — first firmware increment)
+
+The 2D white-bear UI follows the approved reference board (no fur or
+photorealistic assets). On the original Watcher Home page, an independent
+`pibbi_face` LVGL component renders the bear using small, flat shapes.
+This is **not** a full-screen bitmap; eyes, mouth, and cheeks can change
+individually. The component offers `pibbi_face_set_expression()` for
+future camera, audio, and behavior-state integration.
+
+- **On Home:** bear appears in place of the factory Home widgets.
+- **Idle:** slow eye movement and periodic blinking.
+- **Tap:** brief happy expression.
+- **Long-press bear:** expose the unchanged factory Home / Settings menu.
+- **Tap “pibbi” on factory Home:** return to the animated face.
+- **Factory onboarding:** the original Connect / Skip page remains available
+  before the Home page is reached on an unconfigured Watcher.
+
+The LVGL UI must only be modified while holding the LVGL port lock, or from
+an LVGL event/timer callback. This first increment does not yet route the
+knob, Camera, voice, or AI state into the face.
+
+Verification: `./tools/esp32s3/build.ps1 -Clean` (PowerShell), then
+application-only flash with `./tools/esp32s3/flash.ps1 -Port COM31`.
+Hardware validation is required; this implementation has not been flashed
+as part of the GitHub change.
