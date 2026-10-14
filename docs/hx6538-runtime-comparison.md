@@ -230,3 +230,25 @@ The audit *requires* the original `build-manifest.json`, `sscma-watcher.elf` and
 - `objdump-sections.txt`, `nm-symbols.txt`, `readelf-program-headers.txt`: raw tool output for independent reproduction.
 
 The script does not change source, compile, generate an image, access a serial port, or flash the Watcher. The parser has been exercised using a local synthetic ELF/MAP and simulated special-section layout; the actual Windows artifact remains **NOT YET ANALYZED**. Inspect the report, especially `.text.ext`, `.elHeap`, `.ucHeap`, `.heap`, `.stack`, `__HeapLimit`, `__StackLimit` and ELF VMA/LMA, before moving on to M55/MVE performance tests. For exact runtime heap/stack high water, a recovery-safe hardware execution gate is still required.
+
+### Source-defined SRAM allocations outside ELF `.bss` (additional audit requirement)
+
+Legacy SSCMA-Micro `porting/himax/we2/drivers/drv_shared_cfg.h` partitions additional SRAM with literal address macros; these ranges may never appear in the linker MAP as `SHF_ALLOC` sections.
+
+| Source-defined range | Address interval (end-exclusive) | Size |
+|---|---|---:|
+| YUV422 frame, 640x480x2 | `0x3416A000–0x34200000` | 600 KiB |
+| SRAM2 JPEG workspace | `0x36000000–0x36025A90` | 154256 B |
+| alignment gap | `0x36025A90–0x36025AA0` | 16 B |
+| JPEG fill | `0x36025AA0–0x36026AA0` | 4 KiB |
+| SPI TX / RX | `0x36026AA0–0x36038AA0` | 64 KiB + 8 KiB |
+| Serial1 TX / RX | `0x36038AA0–0x360432A0` | 36 KiB + 6 KiB |
+| source-defined shared/free SRAM2 | `0x360432A0–0x36060000` | 118112 B (~115.34 KiB) |
+
+The `el_config_porting.h` definitions `SSCMA_SHARED_BASE64_BUFFER_BASE` / `_SIZE` point to that residual SRAM2 region; it is **not** uncommitted general-purpose heap. The 2,048 KiB first SRAM partition (336 + 1112 + 600) and 384 KiB SRAM2 cover the 2432 KiB configurable system SRAM budget described in the HX6538 datasheet, separate from the Big M55 256 KiB ITCM and 256 KiB DTCM capabilities. Exact device-specific memory aliasing and boot-copy behavior remain to be validated.
+
+### Dynamic RTOS stack allocations cannot be read from `bss`
+
+Legacy app source `sscma.cpp` creates the initial FreeRTOS task with depth 20480; `sscma/main_task.hpp` creates the listener with depth 4096, then deletes the initial task. `sscma/definations.hpp`, `sscma/static_resource.hpp` and `sscma/repl/supervisor.hpp` configure/create an executor task with depth 20480 and supervisor depth 6144. The NTZ ARM M55 FreeRTOS port typedefs `StackType_t` to `uint32_t`, so stack **requests** are respectively 80, 16, 80 and 24 KiB. If all four are briefly allocated during the handoff, the stack requests total 200 KiB (plus TCB, fragmentation and other allocations); after the initial app task has actually been reclaimed, the three remaining requests total 120 KiB. This is a source-level budget, **not** evidence of actual boot execution or measured peak heap usage. The runtime allocation/reclamation timing has not been observed.
+
+**Next gate remains unchanged:** run the verified ELF/MAP analyzer on the actual Windows build, reconcile linker sections with fixed-address source-defined buffers, and only then plan hardware-level M55/Helium/Ethos-U55 benchmarking. Do not merge or flash.
