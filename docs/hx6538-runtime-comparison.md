@@ -316,10 +316,64 @@ The previous 7-byte BSS discrepancy is **fully resolved** using the actual secti
 - `.heap` and `.stack` have `CONTENTS` but **no** `ALLOC` flag; neither appears in Section-to-Segment mapping. They are linker `COPY` sections outside all `PT_LOAD`, notwithstanding their placement in the raw ELF file. Their nominal ranges remain reserved by `__HeapBase/Limit` and `__StackLimit/Top`.
 - `PT_LOAD` flags include RWE for ROM and APP_DATA. These are **ELF program-header metadata**, not a verified MPU/TrustZone permission configuration.
 - VMA=PAddr in all `PT_LOAD` headers; this alone does not establish the on-device flash offsets, signed image size, actual boot-copy actions or correctness of zero-init.
-- The `watcher.ld` source-defined `.zero.table` only lists `.bss` and `.copy.table` only lists `.data`. The build selects `HX_TFM=ON`; the publicly visible `device/startup_WE2_ARMCM55.cc` Reset_Handler is conditional on `!HX_TFM`, so it cannot be assumed to be this ELF's effective reset/initialization sequence. The correct follow-up is *read-only* symbol/build provenance inspection for Reset_Handler, TF-M/2nd loader, and the secure image generator.
+- The `watcher.ld` source-defined `.zero.table` only lists `.bss` and `.copy.table` only lists `.data`. The makefile setting `HX_TFM=ON` should not be conflated with the C preprocessor symbol: the subsequently inspected final MAP resolves `Reset_Handler` to `device/startup_WE2_ARMCM55.o`, matching this source-level startup implementation. Disassembly remains necessary to confirm the compiled instructions. The correct follow-up is *read-only* symbol/build provenance inspection for Reset_Handler, TF-M/2nd loader, and the secure image generator.
 
 ### Next evidence gate — startup/loader provenance, still no flash
 
 Find the actual `Reset_Handler`, `__PROGRAM_START`, and startup object origin in the original ELF/MAP; trace whether the secure boot image generator serializes the VMA-defined buffers or instead packages only file-backed sections and leaves boot RAM initialized by hardware/firmware. Confirm cold/warm boot zero and retention ownership **before** reasoning about PMU/DVFS/retention. Do not use ELF FileSiz sum as the exact flash-image length or link PT_LOAD RWE flags to live security permissions.
 
 The research branch also extends the read-only `analyze-sscma-memory.py` parser so a **future rerun** writes `PT_LOAD` section mapping into both `memory-report.json` and `memory-report.md`. The program-header parser was checked against the original submitted `readelf-program-headers.txt` fixture; re-execution on Windows remains pending.
+
+## 2026-10-15: Real ELF startup symbols and copy/zero table decoding
+
+Evidence from the user's **read-only** `arm-none-eabi-nm -an`, MAP `Select-String` and `arm-none-eabi-objdump -s -j .copy.table -j .zero.table` output from preserved run `20261014T212931104Z-ad823da6`.
+
+### Actual linked startup objects
+
+| Symbol | Address | Provenance |
+|---|---|---|
+| ELF `e_entry` | `0x10001BC5` | Thumb entry, maps to `Reset_Handler` bit-0 tagged address |
+| `Reset_Handler` | `0x10001BC4` | `device/startup_WE2_ARMCM55.o`, `.text.Reset_Handler`, size `0x1A0` |
+| `_start` / `_mainCRTStartup` | `0x100013C0` | Arm GNU `thumb/v8-m.main+dp/hard/crt0.o` |
+| `__copy_table_start__` | `0x10032A20` | after four alignment bytes in `.copy.table` |
+| `__copy_table_end__` | `0x10032A2C` | start of next linker output section |
+| `__zero_table_start__` | `0x10032A30` | after four alignment bytes in `.zero.table` |
+| `__zero_table_end__` | `0x10032A38` | end of linker zero table |
+
+The MAP includes the startup object with `Reset_Handler` in the actual linked image (also `.vectors` at `0x10000000`). The earlier concern that the upstream source was guarded by `#if !defined(HX_TFM)` must be qualified: **`HX_TFM=ON` is a make variable, not direct proof that the `HX_TFM` preprocessor macro is defined for this object**. Since the Reset_Handler symbol and its source object are present, that guarded source path was linked. Confirm the *actual compiled branches* with disassembly, not the make setting alone.
+
+### Literal table bytes (little-endian, words)
+
+```text
+.copy.table @ 0x10032A1C:
+  00000000  0x300292B0  0x300292B0  0x00000296
+
+.zero.table @ 0x10032A2C:
+  00000000  0x30029D20  0x00001ACA
+```
+
+The initial 4-byte zero word in each section is **alignment padding outside the actual table symbol range**, not a table record. `0x296 * 4 = 2648 B` and `0x1ACA * 4 = 27432 B`:
+
+| Table | Effective record | Size | Section covered |
+|---|---|---:|---|
+| copy | source `0x300292B0` → destination `0x300292B0`, 662 32-bit words | 2648 B | `.data` |
+| zero | destination `0x30029D20`, 6858 32-bit words | 27432 B | ordinary `.bss` |
+
+Source and destination in the copy record are identical, consistent with ELF LMA=VMA; **this does not determine the packaging or RAM load mechanism of the signed boot image**. Neither `.ucHeap` nor `.elHeap` is in the zero table. Their `PT_LOAD` headers have `p_filesz=0`, `p_memsz > 0`, but this alone does not prove the actual ROM/secondary loader zeroes both memory pools.
+
+### CMSIS code path identified; final disassembly still required
+
+At the historical SDK SHA, `EPII_CM55M_APP_S/CMSIS/cmsis_gcc.h` defines `__PROGRAM_START` as `__cmsis_start`. That inline function iterates `__copy_table_start__ .. __copy_table_end__` using 32-bit source/destination/word-count triplets, then iterates `__zero_table_start__ .. __zero_table_end__` using 32-bit destination/word-count pairs, finally calling `_start()`. `device/startup_WE2_ARMCM55.cc` calls `SystemInit()`, manages caches, then `__PROGRAM_START()`. `app/main.c` selects `board_init(); app_main();` for `SSCMA`.
+
+**Evidence-level conclusion:** source implementation, linked symbol provenance, table contents and lengths all agree; no proof yet that the final instruction stream actually follows this exact loop path, that a signed image boots, or that early ROM/2nd loader zeroes the separate big heap pools. Existing `heap_4.c` initializes heap free-list metadata on first malloc; SSCMA's `set_model()` explicitly clears its tensor arena before use. Neither fact by itself establishes an all-zero state of the entire 1112 KiB pool at cold/warm boot.
+
+### Next read-only step: disassemble only the relevant linked entry paths
+
+```powershell
+$run = ".\\artifacts\\hx6538\\build-sscma-legacy\\20261014T212931104Z-ad823da6"
+$elf = "$run\\sscma-watcher.elf"
+arm-none-eabi-objdump -d -C --disassemble=Reset_Handler $elf
+arm-none-eabi-objdump -d -C --disassemble=_start $elf
+```
+
+Confirm table loops, branch to `_start`, what C Runtime initializes, and whether either entry path touches the two fixed SRAM pools. No source changes or target access. Keep Native and original Watcher firmware untouched.
