@@ -426,6 +426,41 @@ def correct(rel: str, data: str) -> tuple[str, list[str]]:
         data = data[:start] + block + data[end:]
         changes.append("R3: removed unused image-preview timings")
 
+    # Keep LVGL's compiled-in image descriptors immutable. The dynamic image
+    # array expects mutable descriptors, so use persistent descriptor copies
+    # while preserving their original read-only pixel data.
+    if rel == "app/app_png.c":
+        fix('        if (strcmp(prefix, "speaking") == 0) {',
+            '        if (strcmp(prefix, "speaking") == 0) {\n'
+            '            static lv_img_dsc_t speaking1_desc;\n'
+            '            static lv_img_dsc_t speaking2_desc;', 1)
+        fix('                img_dsc_array[*image_count] = &ui_img_speaking1_png;',
+            '                speaking1_desc = ui_img_speaking1_png;\n'
+            '                img_dsc_array[*image_count] = &speaking1_desc;', 1)
+        fix('                img_dsc_array[*image_count] = &ui_img_speaking2_png;',
+            '                speaking2_desc = ui_img_speaking2_png;\n'
+            '                img_dsc_array[*image_count] = &speaking2_desc;', 1)
+
+    # Audio byte input is borrowed/read-only. Free the saved pointer only if
+    # the caller explicitly transferred ownership with is_need_free=true.
+    if rel == "app/app_audio_player.h":
+        fix("    void *p_mem_buf;", "    const void *p_mem_buf;", 1)
+        fix("esp_err_t app_audio_player_mem(uint8_t *p_buf,",
+            "esp_err_t app_audio_player_mem(const uint8_t *p_buf,", 1)
+        fix("esp_err_t app_audio_player_mem_block(uint8_t *p_buf,",
+            "esp_err_t app_audio_player_mem_block(const uint8_t *p_buf,", 1)
+    if rel == "app/app_audio_player.c":
+        fix("esp_err_t app_audio_player_mem(uint8_t *p_buf,",
+            "esp_err_t app_audio_player_mem(const uint8_t *p_buf,", 1)
+        fix("esp_err_t app_audio_player_mem_block(uint8_t *p_buf,",
+            "esp_err_t app_audio_player_mem_block(const uint8_t *p_buf,", 1)
+        fix("free(p_audio_player->p_mem_buf);",
+            "free((void *)p_audio_player->p_mem_buf);", 2)
+
+    if rel == "app/at_cmd.c":
+        fix("    char *software_version = get_software_version(AT_CMD_CALLER);",
+            "    const char *software_version = get_software_version(AT_CMD_CALLER);", 1)
+
     return data, changes
 
 
