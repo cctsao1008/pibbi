@@ -510,3 +510,58 @@ This confirms that TFLM, its Ethos-U custom-op registration and the Ethos-U driv
 5. **No performance claim**: zero measured cycles, latency, speedup, energy, occupancy, cache misses or RTOS overhead. SDK versions and workloads differ; do not compare Native and SSCMA binaries numerically.
 
 **Next static evidence:** use a MVE-aware disassembler on the manifest-pinned original Native ELF and manually audit `FastImageResize` over `0x1001A4C8–0x1001AA60` (especially `ldc/stc/cdp` renderings). Separately review the Native image-processing call flow, allocation strategy and framebuffer memory placement. Only after recovery/flash safety is established should optional matched runtime benchmarks be designed. Keep Native vendor source and Watcher factory firmware untouched.
+
+## 2026-10-15: Native MVE memory-access audit — GNU/LLVM cross-decoding
+
+Tracking: [Issue #3](https://github.com/cctsao1008/pibbi/issues/3). This is **a direct research-branch commit, not a PR**.
+
+### Primary evidence and decoding procedure
+
+- Original Native SDK: Seeed \`sscma-example-we2/1.0.x\` at \`3ac4e9f557f09fbe4e62806c2a19b5e8a23a9a70\`; Native build manifest verified by the user prior to dumping \`native-disassembly.txt\`.
+- Scope: \`FastImageResize_BGR8U3C_to_RGB24_helium\`, \`0x1001A4C8–0x1001AA60\` (**1432 B**, end exclusive). Parsed GNU disassembly contains **417** recognizable instruction-form lines.
+- GNU objdump for the Arm GNU 13.2 toolchain renders **74** MVE encodings as \`ldc/ldc2/stc/cdp\`. The exact 16-bit opcode halfwords were recovered from the original GNU objdump text and separately assembled for **Clang/LLVM 17.0.0** (\`-target thumbv8.1m.main-none-eabi -march=armv8.1-m.main+mve.fp -mfloat-abi=hard\`, \`llvm-objdump -d --mattr=+mve,+mve.fp\`) decoding; all **74/74** mapped to valid MVE instructions. This is cross-decoding of supplied instruction halfwords, not an independent dump of original ELF bytes; preserve the original artifact provenance.
+- GNU output already had **94** instructions with explicit \`q0–q7\` operands. Adding the 74 distinct cross-decoded sites yields **at least 168 MVE instruction sites** in this one kernel. They are static instruction sites, **not instructions executed per invocation**. \`dls/le\` low-overhead loop instructions are not counted as SIMD.
+- The missing 74 instructions comprise: \`vldrb.u32\` 11, \`vstrb.32\` 6, \`vldrw.u32\` 14, \`vstrw.32\` 11, \`vadd.f32\` 14, \`vadd.i32\` 8, \`vmul.f32\` 7, \`vmov\` 2, \`vidup.u32\` 1. Exactly **42** of these are vector memory instructions (17 byte pixel-path accesses and 25 word stack spills/reloads).
+
+Representative opcode cross-decoding evidence:
+
+| Address | Original halfwords | GNU objdump | LLVM MVE-aware decode | Interpretation |
+|---|---|---|---|---|
+| \`0x1001A4EA\` | \`ec10 ef02\` | \`ldc\` | \`vmov q7[2], q7[0], r2, r0\` | vector lane setup |
+| \`0x1001A514\` | \`ee23 cf6e\` | \`cdp\` | \`vidup.u32 q6, r2, #0x1\` | vector index generation |
+| \`0x1001A532\` | \`ed8d 5f14\` | \`stc\` | \`vstrw.32 q2, [sp, #80]\` | vector spill |
+| \`0x1001A632\` | \`fc94 6f02\` | \`ldc2\` | \`vldrb.u32 q3, [r4, q1]\` | indexed, zero-extended byte gather |
+| \`0x1001A636\` | \`fc94 2f00\` | \`ldc2\` | \`vldrb.u32 q1, [r4, q0]\` | indexed byte gather |
+| \`0x1001A65A\` | \`ec86 6f0e\` | \`stc\` | \`vstrb.32 q3, [r6, q7]\` | indexed byte scatter |
+| \`0x1001A6EC\` | \`fc94 6f08\` | \`ldc2\` | \`vldrb.u32 q3, [r4, q4]\` | indexed byte gather |
+| \`0x1001A7D8\` | \`ed9d 5f00\` | \`ldc\` | \`vldrw.u32 q2, [sp]\` | vector reload |
+| \`0x1001A810\` | \`ed86 4f00\` | \`stc\` | \`vstrb.32 q2, [r6]\` | contiguous byte store |
+| \`0x1001A9A0\` | \`ed87 6f00\` | \`stc\` | \`vstrb.32 q3, [r7]\` | contiguous byte store |
+
+**Conclusion:** the Native resize kernel's preprocessing data path is genuinely vectorized for *both* arithmetic **and** pixel memory operations. These are 4-lane, 32-bit vector register accesses for 8-bit RGB/BGR pixel data, including indexed gathers/scatters. It is inaccurate to call the kernel scalar-memory-only. Conversely, gather/scatter and stack spills are possible costs that must be **measured**; no cache/bus/performance bottleneck has been demonstrated.
+
+### Loop tails and API contract
+
+Four \`dls/le\` low-overhead loop pairs occur at:
+\`0x1001A60E/0x1001A660\`,
+\`0x1001A6DC/0x1001A708\`,
+\`0x1001A798/0x1001A816\`,
+\`0x1001A916/0x1001A9A6\`.
+
+No \`vctp*\` or \`vpst\` predicate instruction was seen among the audited kernel's existing decoded instructions. Several loop-count sequences use \`(width-1)>>2 + 1\`, i.e. ceil(width/4) lanes; do not claim generic safe unpredicated tails without enforcing the API's preconditions.
+
+Crucially, the Native SDK's **pinned** \`EPII_CM55M_APP_S/library/img_proc/img_proc_helium.h\` explicitly states: **output resize width must be a multiple of four**. The same pinned \`tflm_face_embedding/common_config.h\` sets \`FD_INPUT_TENSOR_WIDTH=160\` and \`FD_INPUT_TENSOR_HEIGHT=160\`; \`cvapp_face_embedding.cpp\` passes \`new_w=160\` and \`new_h=160\` to \`hx_lib_image_resize_BGR8U3C_to_RGB24_helium\`. Therefore **this build's actual documented call site satisfies the width contract**. Missing tail predication does **not** establish an out-of-bounds defect in the currently observed application.
+
+### Per-invocation scratch allocation (source ABI + ELF corroboration)
+
+The wrapper at \`0x1001AA60\` loads stack arguments \`[sp,#56]\` and \`[sp,#60]\` into \`r9\` / \`r4\` after saving 56 B. Under Arm hard-float AAPCS and the pinned function declaration these are \`channels\` and \`output_w\`. It executes \`lsl.w r0, r4, #1\`, \`movs r1, #1\`, then \`bl calloc\` at \`0x1001AA88\`, calls the kernel at \`0x1001AAA6\`, and tail-branches to \`free\` at \`0x1001AAB6\`. This is **calloc(2 * output_w, 1)** plus \`free\` **per resize call**. The present \`160\`-pixel width therefore requests a **320-byte temporary buffer** each invocation; this is **not** a 160×160 image-sized temporary allocation.
+
+Its initialization/allocator latency, success status and system-level fragmentation impact have **not** been measured. The shown wrapper does not test the \`calloc\` return before passing it to the kernel, but do not infer an observed allocation failure. The main Native application separately reserves model arenas and fixed buffers via \`mm_reserve_align\`; this temporary allocation belongs to the ordinary C heap.
+
+### Closure and next experiment
+
+- **Verified static:** MVE Intel+FP capability; 168+ vectorized opcode sites in specific kernel; vectorized gather/scatter and stack vector load/store; documented output-width restriction; current 160-width call satisfies contract; 320 B \`calloc/free\` per resize; linked TFLM/Ethos-U driver path.
+- **Still unverified:** boot execution, image-output correctness, pointer memory safety outside documented API contract, cache/bus stall cycles, real vector speedup, allocation latency, total preprocessing vs NPU elapsed time.
+- **Next:** choose *instrumentation boundaries* for resize, quantization/copy, face-detection Invoke, postprocessing, face alignment, embedding Invoke. Create a no-flash benchmark design referencing stable Native symbols, buffer lifetimes and cache-maintenance boundaries. Do not compare unrelated SSCMA SDK revision to Native for framework overhead.
+
+**Project policy:** continue with direct commits to the isolated research branch and [Issue #3](https://github.com/cctsao1008/pibbi/issues/3). Keep PR #2 closed; do not open another PR, merge, generate signed flash images, or modify the factory firmware/Native SDK.
