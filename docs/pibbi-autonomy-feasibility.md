@@ -119,3 +119,52 @@ The unit tests were run locally before committing equivalent files. The GitHub c
 - Watcher's native task-triggered alerts are **already** a vendor-provided behavior; our experiment is not to recreate them.
 
 Only a measured difference in interruption load, stale-evidence handling, and goal completion compared to naive event rules on the same trace would justify continued autonomy development; otherwise stop rather than building yet another home-automation rule set.
+
+
+## G1 Windows factory-Watcher HTTP Push probe (2026-10-15)
+
+Physical SenseCAP Watcher is **available**, confirmed by user. Firmware variant, SenseCraft setup and network path are still **unverified**. The following instructions assume the classic SenseCraft task workflow and are not guaranteed to appear under newer Watcher Agent firmware.
+
+Vendor source: [Seeed Watcher to Node-RED — Method 2 (HTTP)](https://wiki.seeedstudio.com/watcher_to_node_red/): task Detail Configs -> HTTP Push Notification -> Go Setup -> PC LAN IP and receiver port -> Update Now -> Run Task. Official flow receives `POST /v1/notification/event` and returns HTTP 200. The example function references `msg.payload.events.text` as illustrative, **not yet our observed payload schema**.
+
+Experimental receiver: `tools/autonomy/watcher_http_probe.py`. Python standard library only, POST endpoint and health check (`/health`). Does not store raw request JSON, images, text values, headers or credentials. Appends metadata, content length, hash prefix, sender IP, and field names/types/lengths in local JSONL; no event is allowed into Autonomous Core until payload schema, source and semantics are established. Experimental receiver has **no authentication**: bind it to PC RFC1918 LAN IP, use Windows Private-profile firewall for local subnet only, and never port-forward.
+
+### On Windows PowerShell at repo root
+
+```powershell
+git switch research/hx6538-runtime-baseline-audit-20261015
+git pull --ff-only
+py -m unittest discover -s .\tests -p 'test_autonomy*.py' -v
+
+# Identify the Windows PC LAN IPv4 on the same network reachable from Watcher:
+ipconfig
+$pcIP = '192.168.1.100' # REPLACE with your PC's actual private LAN IPv4
+$run = '.\artifacts\pibbi\watcher-g1'
+New-Item -ItemType Directory -Force $run | Out-Null
+
+py .\tools\autonomy\watcher_http_probe.py --bind $pcIP --port 1880 `
+  --output "$run\watcher-http-shapes.jsonl"
+```
+
+Use a **second** PowerShell window (or another terminal) to test PC routing; this is only a synthetic HTTP request, not real Watcher evidence:
+
+```powershell
+$pcIP = '192.168.1.100' # same actual PC LAN IPv4
+Invoke-RestMethod -Method Post -Uri "http://${pcIP}:1880/v1/notification/event" `
+  -ContentType 'application/json' -Body '{"synthetic_test":true}'
+```
+
+The probe expects HTTP 200 with JSON `code:200`, and should print one schema-only record. Stop with Ctrl+C after gathering the needed samples. A failed Watcher connection may be due to Wi-Fi client isolation, different subnets, wrong LAN IP/port, a blocked Windows Defender Firewall Private inbound rule, or firmware that does not support this HTTP configuration. Do not change Watcher firmware to solve an HTTP problem.
+
+### First physical validation
+
+1. Keep factory firmware. Use the default local **person detection** task; SenseCraft APP Detail Configs HTTP Push to the PC LAN IP and port 1880, then Update Now / Run Task. If menus differ, record the firmware version and a screenshot of actual settings before proceeding.
+2. Generate a few deliberate positive detections while the PC probe listens. Confirm receiver sees a second record after the synthetic test; event sender IP must be from your local device/network.
+3. Share only sanitized `shape` records (not raw JSON, image, Device EUI, API tokens or faces), so we can implement an adapter matching **actual** fields.
+4. Acquire 20 positive notifications where practical, noting attempts that produced no delivery. Analyze event rates, duplicate hashes and payload schema consistency. Hash prefixes are only hints; changes to timestamps make semantically duplicate records hash differently.
+
+### Gate still open
+
+- Neither these instructions nor the committed receiver proves real Watcher connectivity. The user must run the Windows probe and collect at least one physical event.
+- HTTP reception does not authenticate the sender, establish human identity, provide camera control or prove no person is present on silent periods.
+- The receiver was committed with 4 additional local-loopback test cases; the user's independent Windows run is pending.
