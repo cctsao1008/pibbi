@@ -23,6 +23,20 @@ def replace_exact(text: str, before: str, after: str, count: int = 1) -> str:
     return text.replace(before, after)
 
 
+def remove_dead_static_function(data: str, name: str) -> str:
+    """Remove a source-verified, unused file-local C function.
+
+    Only a single-line static function declaration with a brace-delimited
+    body ending at column zero is accepted. Refuse upstream drift.
+    """
+    pattern = (r"(?ms)^static[^;\\n]*\\b" + re.escape(name)
+               + r"\\s*\\([^;]*?\\)\\s*\\{.*?^\\}\\n?")
+    updated, count = re.subn(pattern, "", data)
+    if count != 1:
+        raise RuntimeError(f"Expected one unused static C function {name}, got {count}")
+    return updated
+
+
 def correct(rel: str, data: str) -> tuple[str, list[str]]:
     changes: list[str] = []
 
@@ -286,6 +300,35 @@ def correct(rel: str, data: str) -> tuple[str, list[str]]:
         fix("static int __start(void *p_module)\n{\n    char *p_token = NULL, *p_host = NULL;\n\n    tf_module_img_analyzer_t *p_module_ins = (tf_module_img_analyzer_t *)p_module;\n    struct tf_module_img_analyzer_params *p_params = &p_module_ins->params;", "static int __start(void *p_module)\n{\n    char *p_token = NULL, *p_host = NULL;\n\n    tf_module_img_analyzer_t *p_module_ins = (tf_module_img_analyzer_t *)p_module;", 1)
     elif rel == "task_flow_module/tf_module_ai_camera.c":
         fix("static bool __condition_check_whith_filter(tf_module_ai_camera_t *p_module_ins, struct tf_data_inference_info *p_inference)\n{\n    struct tf_module_ai_camera_params *p_params = &p_module_ins->params;", "static bool __condition_check_whith_filter(tf_module_ai_camera_t *p_module_ins, struct tf_data_inference_info *p_inference)\n{", 1)
+
+    # Remove file-local dead implementations diagnosed as unused by GCC.
+    if rel == "app/app_wifi.c":
+        data = remove_dead_static_function(data, "min")
+        changes.append("Removed dead static function min")
+        data = remove_dead_static_function(data, "__wifi_shutdown")
+        changes.append("Removed dead static function __wifi_shutdown")
+    elif rel == "app/app_device_info.c":
+        data = remove_dead_static_function(data, "__safely_set_devicecfg_uint_value")
+        changes.append("Removed dead static function __safely_set_devicecfg_uint_value")
+        data = remove_dead_static_function(data, "__safely_set_devicecfg_str_value")
+        changes.append("Removed dead static function __safely_set_devicecfg_str_value")
+    elif rel == "app/app_taskflow.c":
+        data = remove_dead_static_function(data, "__taskflow_reload_from_spiffs")
+        changes.append("Removed dead static function __taskflow_reload_from_spiffs")
+    elif rel == "app/app_voice_interaction.c":
+        data = remove_dead_static_function(data, "__data_lock")
+        changes.append("Removed dead static function __data_lock")
+        data = remove_dead_static_function(data, "__data_unlock")
+        changes.append("Removed dead static function __data_unlock")
+    elif rel == "view/ui_manager/pm.c":
+        data = remove_dead_static_function(data, "printGroup")
+        changes.append("Removed dead static function printGroup")
+    elif rel == "view/view_image_preview.c":
+        data = remove_dead_static_function(data, "jpeg_decoder_deinit")
+        changes.append("Removed dead static function jpeg_decoder_deinit")
+    elif rel == "util/util.c":
+        data = remove_dead_static_function(data, "WriteNameToBuffer")
+        changes.append("Removed dead static function WriteNameToBuffer")
 
     # esp_event_post_to's fifth argument is size_t. NULL is a pointer and
     # generates -Wint-conversion; the intended payload length is zero.
