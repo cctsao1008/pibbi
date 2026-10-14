@@ -22,3 +22,9 @@ artifacts/
 .idea/
 .DS_Store
 Thumbs.db
+
+# ESP-IDF generated config/cache for pibbi firmware
+/firmware/esp32s3/sdkconfig
+/firmware/esp32s3/sdkconfig.old
+/firmware/esp32s3/dependencies.lock
+/firmware/esp32s3/managed_components/

@@ -19,7 +19,7 @@ For an interactive ESP-IDF shell without changing the machine-wide environment:
 . .\tools\setup\activate-esp32s3.ps1
 ```
 
-The pibbi baseline pins ESP-IDF `v5.2.1` at its exact release commit because the upstream Watcher factory-firmware documentation explicitly requires that version. The Watcher firmware checkout intentionally tracks `main` until one exact revision has passed real-hardware build/flash/smoke validation.
+The pibbi baseline pins ESP-IDF `v5.2.1` at its exact release commit because the upstream Watcher factory-firmware documentation explicitly requires that version. The Watcher firmware checkout tracks `main` as an external dependency. The pibbi application compiles its sources without modifying the upstream checkout.
 
 ## Important factory-data rule
 
@@ -40,7 +40,7 @@ Do not erase the whole device as a normal bring-up step.
 Before changing flash, inspect the ESP32-S3 non-destructively:
 
 ```powershell
-.\tools\esp32s3\inspect-device.ps1 -Port COM14
+.\tools\esp32s3\inspect-device.ps1 -Port COM31
 ```
 
 The script queries:
@@ -54,7 +54,7 @@ The script queries:
 Back up the upstream-documented `nvsfactory` region before the first flash:
 
 ```powershell
-.\tools\esp32s3\backup-nvsfactory.ps1 -Port COM14
+.\tools\esp32s3\backup-nvsfactory.ps1 -Port COM31
 ```
 
 The script follows Seeed's documented factory layout (`0x9000`, 200 KiB), calculates SHA-256, and stores the result under:
@@ -68,7 +68,7 @@ artifacts/esp32s3/nvsfactory-backup/<utc-run-id>/
 For stronger recovery coverage, also preserve the complete SPI flash:
 
 ```powershell
-.\tools\esp32s3\backup-flash.ps1 -Port COM14
+.\tools\esp32s3\backup-flash.ps1 -Port COM31
 ```
 
 The full backup detects the SPI flash size, reads the complete device image, verifies output length, calculates SHA-256, and stores:
@@ -82,12 +82,12 @@ artifacts/esp32s3/factory-backup/<utc-run-id>/
 Both backup scripts default to 2,000,000 baud. Override with `-Baud` if the host/USB-UART path is unstable. If full-flash size detection is unavailable, specify it explicitly, for example 32 MiB:
 
 ```powershell
-.\tools\esp32s3\backup-flash.ps1 -Port COM14 -SizeBytes 33554432
+.\tools\esp32s3\backup-flash.ps1 -Port COM31 -SizeBytes 33554432
 ```
 
 ## Build
 
-Build the upstream factory-compatible firmware:
+Build the pibbi application (upstream Factory Firmware plus pibbi sensor component):
 
 ```powershell
 .\tools\esp32s3\build.ps1
@@ -116,15 +116,15 @@ The manifest records the exact Watcher source commit, ESP-IDF commit, target, ap
 Safe default:
 
 ```powershell
-.\tools\esp32s3\flash.ps1 -Port COM14
+.\tools\esp32s3\flash.ps1 -Port COM31
 ```
 
-`flash.ps1` defaults to `factory_firmware`, verifies the build manifest and ELF/BIN hashes, and consumes ESP-IDF's generated `flash_app_args`. This writes the application only; it does not intentionally rewrite the bootloader, partition table, or `nvsfactory` partition.
+`flash.ps1` defaults to `pibbi`, verifies the build manifest and ELF/BIN hashes, and consumes ESP-IDF's generated `flash_app_args`. This writes the application only; it does not intentionally rewrite the bootloader, partition table, or `nvsfactory` partition.
 
 A non-factory example is rejected unless explicitly overridden:
 
 ```powershell
-.\tools\esp32s3\flash.ps1 -Port COM14 -Example helloworld -AllowNonFactoryExample
+.\tools\esp32s3\flash.ps1 -Port COM31 -Example helloworld -AllowNonFactoryExample
 ```
 
 Use that override only after checking that the generated application offset is compatible with the actual device layout.
@@ -134,25 +134,24 @@ After a successful flash, the exact application artifact and operation are recor
 ## Monitor
 
 ```powershell
-.\tools\esp32s3\monitor.ps1 -Port COM14
+.\tools\esp32s3\monitor.ps1 -Port COM31
 ```
 
 Use `Ctrl+]` to exit the ESP-IDF monitor.
 
-## Bring-up order
+## Direct firmware development
 
-For a new Watcher, use this order:
+Build and flash using the existing project scripts:
 
-1. `bootstrap-esp32s3.ps1`
-2. `check-esp32s3-env.ps1`
-3. `inspect-device.ps1`
-4. `backup-nvsfactory.ps1`
-5. `backup-flash.ps1`
-6. `build.ps1` (`factory_firmware` by default)
-7. verify the build manifest/SHA
-8. `flash.ps1` (application only)
-9. `monitor.ps1`
-10. run the hardware smoke test
-11. only after validation, pin the exact Watcher firmware commit in `tools/setup/esp32s3-tools.psd1`
+```powershell
+.\tools\esp32s3\build.ps1
+.\tools\esp32s3\flash.ps1 -Port COM31
+.\tools\esp32s3\monitor.ps1 -Port COM31
+```
 
-This keeps host setup, source revision, generated binaries, factory data, device state, and hardware validation independently traceable.
+The pibbi ESP-IDF project reuses upstream Camera, UI, Task Flow and network
+components while adding a repository-owned Waveshare I2C Sensor Service.
+Compile, flash and debug directly as part of normal feature development.
+
+`-Example factory_firmware` still builds and flashes the original example;
+all other non-factory examples require the explicit flash override.

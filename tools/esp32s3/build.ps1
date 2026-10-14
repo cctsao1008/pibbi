@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Example = 'factory_firmware',
+    [string]$Example = 'pibbi',
     [switch]$Clean
 )
 
@@ -12,7 +12,13 @@ Set-StrictMode -Version Latest
 $repoRoot = Get-PibbiRepoRoot
 $config = Get-Esp32S3ToolConfig
 $watcherRoot = Join-Path $repoRoot $config.WatcherFirmware.Directory
-$projectRoot = Join-Path $watcherRoot (Join-Path 'examples' $Example)
+# Build pibbi-owned firmware without editing upstream sources.
+$projectRoot = if ($Example -eq 'pibbi') {
+    Join-Path $repoRoot 'firmware\esp32s3'
+}
+else {
+    Join-Path $watcherRoot (Join-Path 'examples' $Example)
+}
 
 if (-not (Test-Path -LiteralPath $projectRoot -PathType Container)) {
     throw "Watcher example not found: $projectRoot"

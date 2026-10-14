@@ -1,8 +1,8 @@
 # pibbi
 
-`pibbi` is an early-stage embedded/physical-AI project built around the SenseCAP Watcher platform.
+`pibbi` is an embedded/physical-AI software project built on the SenseCAP Watcher platform. It reuses Seeed's factory firmware while adding pibbi-owned application modules without changing vendor checkouts.
 
-The repository intentionally starts with reproducible development infrastructure before pibbi-owned firmware diverges from upstream vendor code.
+The existing toolchain infrastructure remains in place; the ESP32-S3 project now directly builds pibbi-owned firmware functionality on top of Seeed sources.
 
 ## Current platform baseline
 
@@ -14,9 +14,8 @@ The repository intentionally starts with reproducible development infrastructure
 
 ```text
 pibbi/
-├─ firmware/                  # pibbi-owned firmware/application code (planned)
-│  ├─ hx6538/
-│  └─ esp32s3/
+├─ firmware/                  # pibbi-owned firmware/application code
+│  └─ esp32s3/               # ESP-IDF app + sensor component
 ├─ third_party/               # external SDK/source checkouts; not vendored into Git
 ├─ tools/
 │  ├─ setup/                  # reproducible development environments
@@ -89,12 +88,12 @@ See [`tools/hx6538/README.md`](tools/hx6538/README.md).
 The Watcher factory firmware contains a critical `nvsfactory` partition. Preserve it before the first flash:
 
 ```powershell
-.\tools\esp32s3\inspect-device.ps1 -Port COM14
-.\tools\esp32s3\backup-nvsfactory.ps1 -Port COM14
-.\tools\esp32s3\backup-flash.ps1 -Port COM14
+.\tools\esp32s3\inspect-device.ps1 -Port COM31
+.\tools\esp32s3\backup-nvsfactory.ps1 -Port COM31
+.\tools\esp32s3\backup-flash.ps1 -Port COM31
 ```
 
-Build the upstream factory-compatible firmware:
+Build the pibbi application, reusing upstream factory firmware modules:
 
 ```powershell
 .\tools\esp32s3\build.ps1
@@ -103,28 +102,30 @@ Build the upstream factory-compatible firmware:
 Then flash the verified **application only** and monitor it:
 
 ```powershell
-.\tools\esp32s3\flash.ps1 -Port COM14
-.\tools\esp32s3\monitor.ps1 -Port COM14
+.\tools\esp32s3\flash.ps1 -Port COM31
+.\tools\esp32s3\monitor.ps1 -Port COM31
 ```
 
-`flash.ps1` defaults to `factory_firmware` and uses ESP-IDF's generated `flash_app_args`, avoiding normal bring-up rewrites of the bootloader, partition table, and factory-data partition.
+`build.ps1` and `flash.ps1` now default to `pibbi`, which mirrors the upstream factory partition layout. The flash wrapper still writes the application only, not the bootloader, partition table, or factory-data partition.
 
 Build/flash/backup evidence is stored under `artifacts/` and ignored by Git.
 
 See [`tools/esp32s3/README.md`](tools/esp32s3/README.md).
 
-## Bring-up policy
+## Development policy
 
-The first milestone is not a custom feature. It is a controlled, traceable known-good baseline for both processors:
+Build software directly with the mature Seeed firmware, ESP-IDF and existing
+drivers. Build, flash, execution and debugging are regular software-development
+steps rather than separate feasibility or hardware-validation milestones.
 
-1. bootstrap the required host environment(s);
-2. validate dependency versions and source revisions;
-3. inspect the physical Watcher and preserve critical factory data;
-4. build unmodified upstream firmware;
-5. preserve exact generated artifacts and SHA-256 evidence;
-6. flash only the intended artifact/partition and record what reached the hardware;
-7. boot the Watcher and validate the relevant camera/UI/audio/host interfaces;
-8. pin the exact upstream revision that passed hardware validation;
-9. only then begin pibbi-specific firmware changes.
+- pibbi-owned source is tracked in `firmware/esp32s3/`.
+- Vendor checkouts remain in the ignored `third_party/` directory.
+- The initial Sensor Service inventories the five Waveshare HAT I2C endpoints
+  and publishes device-set changes through ESP-IDF events.
+- Measurement drivers, observation transport and the LSMM adapter are the
+  next software features (not yet implemented).
+- Factory data was backed up separately on 2026-10-14. Keep it private and
+  continue using application-only flashing.
+- The W1-A ESP32-S3 appeared as COM31 on the current PC; ports can change.
 
-This keeps host-tool risk, vendor-integration risk, hardware bring-up risk, factory-data risk, and pibbi application changes separated enough to debug independently.
+See [firmware/esp32s3/README.md](firmware/esp32s3/README.md) for integration.

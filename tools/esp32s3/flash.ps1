@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Port,
-    [string]$Example = 'factory_firmware',
+    [string]$Example = 'pibbi',
     [switch]$AllowNonFactoryExample
 )
 
@@ -17,10 +17,9 @@ if (-not (Test-Path -LiteralPath $watcherRoot -PathType Container)) {
     throw 'Watcher firmware checkout is missing. Run bootstrap-esp32s3.ps1 first.'
 }
 
-# Upstream Watcher documentation explicitly recommends app-only flashing to
-# protect the critical nvsfactory partition. Non-factory examples can use a
-# different partition layout, so require an explicit override before allowing one.
-if ($Example -ne 'factory_firmware' -and -not $AllowNonFactoryExample) {
+# Preserve nvsfactory using application-only flash. pibbi mirrors the factory
+# partition layout. Unrelated examples still require an explicit override.
+if ($Example -notin @('factory_firmware', 'pibbi') -and -not $AllowNonFactoryExample) {
     throw "Refusing to flash non-factory example '$Example' by default. Its partition layout may not match the factory Watcher. Use -AllowNonFactoryExample only after reviewing the generated app offset against the device layout."
 }
 
