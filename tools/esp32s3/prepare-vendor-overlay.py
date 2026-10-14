@@ -348,6 +348,84 @@ def correct(rel: str, data: str) -> tuple[str, list[str]]:
         if data != previous:
             changes.append("zero-length ESP event payloads use size 0")
 
+    # R3 compiler-diagnostic fixes: source-asserted; no warnings are suppressed.
+    if rel == "app/app_cmd.c":
+        fix("    char *url = NULL;", "    const char *url = NULL;", 1)
+    elif rel == "app/app_ota.c":
+        fix("esp_err_t app_ota_ai_model_download(char *url, int size_bytes)", "esp_err_t app_ota_ai_model_download(const char *url, int size_bytes)", 1)
+        fix("esp_err_t app_ota_esp32_fw_download(char *url)", "esp_err_t app_ota_esp32_fw_download(const char *url)", 1)
+        fix("esp_err_t app_ota_himax_fw_download(char *url)", "esp_err_t app_ota_himax_fw_download(const char *url)", 1)
+    elif rel == "app/app_ota.h":
+        fix("esp_err_t app_ota_ai_model_download(char *url, int size_bytes);", "esp_err_t app_ota_ai_model_download(const char *url, int size_bytes);", 1)
+        fix("esp_err_t app_ota_esp32_fw_download(char *url);", "esp_err_t app_ota_esp32_fw_download(const char *url);", 1)
+        fix("esp_err_t app_ota_himax_fw_download(char *url);", "esp_err_t app_ota_himax_fw_download(const char *url);", 1)
+    elif rel == "app/app_device_info.c":
+        fix("char *get_software_version(int caller)", "const char *get_software_version(int caller)", 1)
+        fix("const uint8_t *get_bt_mac()", "const uint8_t *get_bt_mac(void)", 1)
+    elif rel == "app/app_device_info.h":
+        fix("char *get_software_version(int caller);", "const char *get_software_version(int caller);", 1)
+        fix("const uint8_t *get_bt_mac();", "const uint8_t *get_bt_mac(void);", 1)
+    elif rel == "view/ui_manager/ui_events.c":
+        fix("    const uint8_t *bt_mac = retry_get_data(get_bt_mac, 0, MAX_RETRIES);", "    const uint8_t *bt_mac = get_bt_mac();", 1)
+    elif rel == "app/app_sensecraft.c":
+        fix("end:\n    free(url);\n    esp_http_client_close(client);", "end:\n    if (ret != ESP_OK) {\n        ESP_LOGE(TAG, \"SenseCraft HTTP request failed: %s\", esp_err_to_name(ret));\n    }\n    free(url);\n    esp_http_client_close(client);", 1)
+        fix("    size_t len =0;\n", "", 1)
+    elif rel == "app/app_wifi.c":
+        fix("void wifi_scan(void)\n{\n    esp_err_t ret;", "void wifi_scan(void)\n{\n    esp_err_t ret = ESP_OK;", 1)
+        fix("wifi_scan_end:\n    free(ap_info);", "wifi_scan_end:\n    if (ret != ESP_OK) {\n        ESP_LOGE(TAG, \"Wi-Fi scan failed: %s\", esp_err_to_name(ret));\n    }\n    free(ap_info);", 1)
+    elif rel == "app/at_cmd.c":
+        fix("    int time_flag = 0;\n", "", 1)
+        fix("    struct view_data_wifi_st *p_cfg;\n", "", 1)
+        fix("            static bool fist = true;\n", "", 1)
+    elif rel == "view/ui_manager/animation.c":
+        fix("static const char *TAG = \"animation_event\";\n", "", 1)
+    elif rel == "view/view_alarm.c":
+        fix("static lv_obj_t * ui_Page_test;\n", "", 1)
+    elif rel == "view/ui_manager/pm.c":
+        fix("static const char *TAG = \"PM_EVENT\";\n#define PM_PAGE_PRINTER (0)", "#define PM_PAGE_PRINTER (0)\n#if PM_PAGE_PRINTER\nstatic const char *TAG = \"PM_EVENT\";\n#endif", 1)
+        fix("    static lv_obj_t * focused_obj;\n", "", 1)
+        fix("        const char *group_obj_name = lv_obj_get_user_data(groupInfo->group[index]);\n", "", 1)
+    elif rel == "app/app_taskflow.c":
+        fix("    struct app_taskflow * p_taskflow = ( struct app_taskflow *)p_arg;\n    struct view_data_taskflow_status status;\n    bool need_report = false;\n    intmax_t tid = 0;\n    const char *p_module_name = NULL;\n    char err_msg[64];", "    struct view_data_taskflow_status status;\n    intmax_t tid = 0;", 1)
+        fix("                    int engine_status = 0;\n                    struct view_data_taskflow_status status;\n", "                    int engine_status = 0;\n", 1)
+    elif rel == "app/app_voice_interaction.c":
+        fix("        ESP_LOGE(TAG, \"code is not number or not find\");\n        goto err;", "        ESP_LOGE(TAG, \"code is not number or not find\");\n        ret = ESP_ERR_INVALID_RESPONSE;\n        goto err;", 1)
+        fix("        ESP_LOGE(TAG, \"data is not object\");\n        goto err;", "        ESP_LOGE(TAG, \"data is not object\");\n        ret = ESP_ERR_INVALID_RESPONSE;\n        goto err;", 1)
+        fix("            if (result == NULL) {\n                ESP_LOGE(TAG, \"malloc failed\");\n                goto err;", "            if (result == NULL) {\n                ESP_LOGE(TAG, \"malloc failed\");\n                ret = ESP_ERR_NO_MEM;\n                goto err;", 1)
+        fix("    if (p_json_root != NULL) {\n        cJSON_Delete(p_json_root);\n    }\n    return ESP_OK;\n}\n\nint app_vi_result_free", "    if (p_json_root != NULL) {\n        cJSON_Delete(p_json_root);\n    }\n    return ret;\n}\n\nint app_vi_result_free", 1)
+    elif rel == "task_flow_engine/src/tf_parse.c":
+        fix("err:\n    if (p_json_root != NULL)", "err:\n    if (ret != ESP_OK) {\n        ESP_LOGE(TAG, \"Taskflow JSON parsing failed: %s\", esp_err_to_name(ret));\n    }\n    if (p_json_root != NULL)", 2)
+
+    # The module-status callback has a disabled (#if 0) reporting branch.
+    # Drop assignments only inside this callback, preserving other callbacks.
+    if rel == "app/app_taskflow.c":
+        start = data.index("static void __task_flow_module_status_cb(")
+        end = data.index("static void __taskflow_task(", start)
+        block = data[start:end]
+        for item in ('        p_module_name = p_name;\n',
+                     '        p_module_name = "unknown";\n'):
+            if block.count(item) != 1:
+                raise RuntimeError("R3 module-status callback source drift")
+            block = block.replace(item, "")
+        data = data[:start] + block + data[end:]
+        changes.append("R3: removed dormant callback assignments")
+
+    # Do not remove timings used by later view functions.
+    if rel == "view/view_image_preview.c":
+        start = data.index("int view_image_preview_flush(")
+        end = data.index("void view_image_black_flush(", start)
+        block = data[start:end]
+        for item, count in (
+            ("    int64_t start = 0, end = 0;\n", 1),
+            ("    start = esp_timer_get_time();\n", 2),
+            ("    end = esp_timer_get_time();\n", 2),
+        ):
+            if block.count(item) != count:
+                raise RuntimeError("R3 image-preview timing source drift")
+            block = block.replace(item, "")
+        data = data[:start] + block + data[end:]
+        changes.append("R3: removed unused image-preview timings")
+
     return data, changes
 
 
