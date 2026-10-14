@@ -261,6 +261,32 @@ def correct(rel: str, data: str) -> tuple[str, list[str]]:
     elif rel == "task_flow_module/tf_module_uart_alarm.c":
         fix("err:\n    free(p_module_ins);", "err:\n    ESP_LOGE(TAG, \"UART alarm init failed: %s\", esp_err_to_name(ret));\n    free(p_module_ins);", 1)
 
+    # Remove unused stub locals; propagate unregister result instead of losing it.
+    if rel == "task_flow_module/tf_module_debug.c":
+        fix("static int __start(void *p_module)\n{\n    tf_module_debug_t *p_module_ins = (tf_module_debug_t *)p_module;", "static int __start(void *p_module)\n{", 1)
+        fix("static int __cfg(void *p_module, cJSON *p_json)\n{\n    tf_module_debug_t *p_module_ins = (tf_module_debug_t *)p_module;", "static int __cfg(void *p_module, cJSON *p_json)\n{", 1)
+        fix("static int __msgs_pub_set(void *p_module, int output_index, int *p_evt_id, int num)\n{\n    tf_module_debug_t *p_module_ins = (tf_module_debug_t *)p_module;", "static int __msgs_pub_set(void *p_module, int output_index, int *p_evt_id, int num)\n{", 1)
+        fix("    esp_err_t ret = tf_event_handler_unregister(p_module_ins->evt_id, __event_handler);\n    return 0;", "    return tf_event_handler_unregister(p_module_ins->evt_id, __event_handler);", 1)
+        fix("    tf_module_debug_t *p_module_ins = (tf_module_debug_t *)handler_args;\n", "", 1)
+    elif rel == "task_flow_module/tf_module_local_alarm.c":
+        fix("static int __start(void *p_module)\n{\n    tf_module_local_alarm_t *p_module_ins = (tf_module_local_alarm_t *)p_module;", "static int __start(void *p_module)\n{", 1)
+        fix("static int __msgs_pub_set(void *p_module, int output_index, int *p_evt_id, int num)\n{\n    tf_module_local_alarm_t *p_module_ins = (tf_module_local_alarm_t *)p_module;", "static int __msgs_pub_set(void *p_module, int output_index, int *p_evt_id, int num)\n{", 1)
+    elif rel == "task_flow_module/tf_module_http_alarm.c":
+        fix("static int __start(void *p_module)\n{\n    tf_module_http_alarm_t *p_module_ins = (tf_module_http_alarm_t *)p_module;", "static int __start(void *p_module)\n{", 1)
+        fix("static int __msgs_pub_set(void *p_module, int output_index, int *p_evt_id, int num)\n{\n    tf_module_http_alarm_t *p_module_ins = (tf_module_http_alarm_t *)p_module;", "static int __msgs_pub_set(void *p_module, int output_index, int *p_evt_id, int num)\n{", 1)
+    elif rel == "task_flow_module/tf_module_uart_alarm.c":
+        fix("static int __start(void *p_module)\n{\n    tf_module_uart_alarm_t *p_module_ins = (tf_module_uart_alarm_t *)p_module;", "static int __start(void *p_module)\n{", 1)
+        fix("static int __msgs_pub_set(void *p_module, int output_index, int *p_evt_id, int num)\n{\n    tf_module_uart_alarm_t *p_module_ins = (tf_module_uart_alarm_t *)p_module;", "static int __msgs_pub_set(void *p_module, int output_index, int *p_evt_id, int num)\n{", 1)
+    elif rel == "task_flow_module/tf_module_sensecraft_alarm.c":
+        fix("static int __start(void *p_module)\n{\n    tf_module_sensecraft_alarm_t *p_module_ins = (tf_module_sensecraft_alarm_t *)p_module;", "static int __start(void *p_module)\n{", 1)
+        fix("static int __msgs_pub_set(void *p_module, int output_index, int *p_evt_id, int num)\n{\n    tf_module_sensecraft_alarm_t *p_module_ins = (tf_module_sensecraft_alarm_t *)p_module;", "static int __msgs_pub_set(void *p_module, int output_index, int *p_evt_id, int num)\n{", 1)
+    elif rel == "task_flow_module/tf_module_alarm_trigger.c":
+        fix("static int __start(void *p_module)\n{\n    tf_module_alarm_trigger_t *p_module_ins = (tf_module_alarm_trigger_t *)p_module;", "static int __start(void *p_module)\n{", 1)
+    elif rel == "task_flow_module/tf_module_img_analyzer.c":
+        fix("static int __start(void *p_module)\n{\n    char *p_token = NULL, *p_host = NULL;\n\n    tf_module_img_analyzer_t *p_module_ins = (tf_module_img_analyzer_t *)p_module;\n    struct tf_module_img_analyzer_params *p_params = &p_module_ins->params;", "static int __start(void *p_module)\n{\n    char *p_token = NULL, *p_host = NULL;\n\n    tf_module_img_analyzer_t *p_module_ins = (tf_module_img_analyzer_t *)p_module;", 1)
+    elif rel == "task_flow_module/tf_module_ai_camera.c":
+        fix("static bool __condition_check_whith_filter(tf_module_ai_camera_t *p_module_ins, struct tf_data_inference_info *p_inference)\n{\n    struct tf_module_ai_camera_params *p_params = &p_module_ins->params;", "static bool __condition_check_whith_filter(tf_module_ai_camera_t *p_module_ins, struct tf_data_inference_info *p_inference)\n{", 1)
+
     # esp_event_post_to's fifth argument is size_t. NULL is a pointer and
     # generates -Wint-conversion; the intended payload length is zero.
     if rel.endswith(".c"):
