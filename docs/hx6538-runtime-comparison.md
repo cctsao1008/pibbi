@@ -202,3 +202,31 @@ Comparison status remains **BLOCKED** until the same-revision SSCMA dependency a
 ## Decision
 
 Use native Himax/WE2 SDK applications for HX6538 performance experiments and keep SSCMA as a **protocol/application reference**, not a required dependency in the hot path. Revisit a full SSCMA comparison only after restoring a complete, buildable, target-matched source tree.
+
+## 2026-10-15: SSCMA heap backing traced to historical source
+
+The historically paired sources give stronger, **source-level** backing evidence, although the user's generated ELF/MAP is still local and has not yet been independently parsed here:
+
+1. `sscma/linker/watcher.ld` places `.ucHeap` at `0x34000000` (336 KiB) and `.elHeap` at `0x34054000` (1112 KiB). In APP_DATA it also reserves `__HEAP_SIZE=0x4000` and `__STACK_SIZE=0x2000` using COPY output sections. Do not treat the linker reported APP_DATA remaining bytes as a directly allocatable runtime free-heap figure.
+2. `os/freertos_10_5_1/NTZ/config/FreeRTOSConfig.h` declares `configTOTAL_HEAP_SIZE=(336*1024)`; FreeRTOS `heap_4.c` has a corresponding static `ucHeap[configTOTAL_HEAP_SIZE]`. Confirm selected build object/configuration and the final `.ucHeap` backing symbol from the generated MAP/ELF; the repository has more than one FreeRTOS configuration.
+3. Historical SSCMA-Micro `porting/himax/we2/el_misc_we2.cpp` defines `static uint8_t elHeap[1112 * 1024]` in `el_aligned_malloc_once()`. This is a monotonically advancing allocator, not a general free-list heap.
+4. `porting/himax/we2/el_config_porting.h` defines `CONFIG_SSCMA_TENSOR_ARENA_SIZE=(1110*1024)`. `sscma/callback/model.hpp` statically requests the arena once with 32-byte alignment, zeroes it on model change, and passes it to `EngineTFLite::init(pool, size)`. The 2 KiB pool-to-arena difference is nominal slack before alignment, **not** a measured runtime free-memory counter.
+5. The reported `bss=1510191 B` versus `336 KiB + 1112 KiB=1482752 B` leaves 27439 B of size accounting outside those two nominal pools. Do not label this remainder SSCMA framework overhead without per-section and symbol proof.
+
+### Read-only ELF/MAP analysis — next local evidence gate
+
+From the research branch on Windows, in a PowerShell session (does **not** build or flash):
+
+```powershell
+git pull --ff-only
+. .\tools\setup\activate-hx6538.ps1
+py .\tools\hx6538\analyze-sscma-memory.py `
+  --run-dir .\artifacts\hx6538\build-sscma-legacy\20261014T212931104Z-ad823da6
+```
+
+The audit *requires* the original `build-manifest.json`, `sscma-watcher.elf` and `sscma-watcher.elf.map`, validates both SHA-256 hashes and the reviewed legacy SDK SHA, and writes derivative files to `<run-dir>/memory-audit/`:
+
+- `memory-report.md` and `memory-report.json`: ELF section VMA/LMA, SHF_ALLOC-like section flags, exact heap candidate symbols, MAP sections, linker heap/stack gap, top-size symbols.
+- `objdump-sections.txt`, `nm-symbols.txt`, `readelf-program-headers.txt`: raw tool output for independent reproduction.
+
+The script does not change source, compile, generate an image, access a serial port, or flash the Watcher. The parser has been exercised using a local synthetic ELF/MAP and simulated special-section layout; the actual Windows artifact remains **NOT YET ANALYZED**. Inspect the report, especially `.text.ext`, `.elHeap`, `.ucHeap`, `.heap`, `.stack`, `__HeapLimit`, `__StackLimit` and ELF VMA/LMA, before moving on to M55/MVE performance tests. For exact runtime heap/stack high water, a recovery-safe hardware execution gate is still required.
