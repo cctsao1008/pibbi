@@ -233,6 +233,34 @@ def correct(rel: str, data: str) -> tuple[str, list[str]]:
     elif rel == "task_flow_module/tf_module_ai_camera.c":
         fix("    bool condition_check = true;\n", "", 1)
 
+    # Keep the effects of ESP-IDF GOTO error macros, use returned errors.
+    if rel == "app/app_ble.c":
+        fix("    const ble_uuid_t *uuid;\n", "", 1)
+        fix("        uuid = ctxt->chr->uuid;\n", "", 2)
+        fix("    const char *name;\n", "", 1)
+    elif rel == "app/app_sensecraft.c":
+        fix("            char *p_topic = NULL;\n", "", 1)
+        fix("                p_topic = event->topic;\n", "", 1)
+        fix("static esp_err_t sensecraft_deviceinfo_get(struct sensecraft_deviceinfo *p_info)\n{\n    esp_err_t ret = ESP_OK;", "static esp_err_t sensecraft_deviceinfo_get(struct sensecraft_deviceinfo *p_info)\n{", 1)
+    elif rel == "app/app_voice_interaction.c":
+        fix("static int __audio_stream_http_connect(struct app_voice_interaction *p_vi)\n{\n    esp_err_t  ret = ESP_OK;", "static int __audio_stream_http_connect(struct app_voice_interaction *p_vi)\n{", 1)
+        fix("            size_t bin_offset  = 0;\n", "", 1)
+    elif rel == "task_flow_module/tf_module_http_alarm.c":
+        fix("static void __event_handler(void *handler_args, esp_event_base_t base, int32_t id, void *p_event_data)\n{\n    esp_err_t ret = ESP_OK;", "static void __event_handler(void *handler_args, esp_event_base_t base, int32_t id, void *p_event_data)\n{", 1)
+        fix("static void http_alarm_task(void *p_arg)\n{\n    int ret = 0;\n    tf_module_http_alarm_t *p_module_ins = (tf_module_http_alarm_t *)p_arg;\n    struct tf_module_http_alarm_params *p_params = &p_module_ins->params;", "static void http_alarm_task(void *p_arg)\n{\n    int ret = 0;\n    tf_module_http_alarm_t *p_module_ins = (tf_module_http_alarm_t *)p_arg;", 1)
+        fix("err:\n    if(p_module_ins->task_handle ) {", "err:\n    ESP_LOGE(TAG, \"HTTP alarm init failed: %s\", esp_err_to_name(ret));\n    if(p_module_ins->task_handle ) {", 1)
+    elif rel == "task_flow_engine/src/tf.c":
+        fix("esp_err_t tf_engine_flow_set(const char *p_str, size_t len)\n{\n    assert(gp_engine);\n    esp_err_t ret = ESP_OK;", "esp_err_t tf_engine_flow_set(const char *p_str, size_t len)\n{\n    assert(gp_engine);", 1)
+        fix("esp_err_t tf_module_register(const char *p_name,\n                             const char *p_desc,\n                             const char *p_version,\n                             const tf_module_mgmt_t *mgmt_handle)\n{\n    assert(gp_engine);\n    esp_err_t ret = ESP_OK;", "esp_err_t tf_module_register(const char *p_name,\n                             const char *p_desc,\n                             const char *p_version,\n                             const tf_module_mgmt_t *mgmt_handle)\n{\n    assert(gp_engine);", 1)
+    elif rel == "task_flow_module/tf_module_alarm_trigger.c":
+        fix("err:\n    if (p_module_ins->sem_handle) {", "err:\n    ESP_LOGE(TAG, \"alarm trigger init failed: %s\", esp_err_to_name(ret));\n    if (p_module_ins->sem_handle) {", 1)
+    elif rel == "task_flow_module/tf_module_sensecraft_alarm.c":
+        fix("err:\n    if (p_module_ins->sem_handle) {", "err:\n    ESP_LOGE(TAG, \"SenseCraft alarm init failed: %s\", esp_err_to_name(ret));\n    if (p_module_ins->sem_handle) {", 1)
+    elif rel == "task_flow_module/tf_module_img_analyzer.c":
+        fix("err:\n    if(p_module_ins->task_handle ) {", "err:\n    ESP_LOGE(TAG, \"image analyzer init failed: %s\", esp_err_to_name(ret));\n    if(p_module_ins->task_handle ) {", 1)
+    elif rel == "task_flow_module/tf_module_uart_alarm.c":
+        fix("err:\n    free(p_module_ins);", "err:\n    ESP_LOGE(TAG, \"UART alarm init failed: %s\", esp_err_to_name(ret));\n    free(p_module_ins);", 1)
+
     # esp_event_post_to's fifth argument is size_t. NULL is a pointer and
     # generates -Wint-conversion; the intended payload length is zero.
     if rel.endswith(".c"):
