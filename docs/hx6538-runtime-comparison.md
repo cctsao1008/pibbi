@@ -439,3 +439,74 @@ The CRT disassembly also confirms no direct memset of `.ucHeap` at `0x34000000` 
 - **NEXT: Native M55/Helium ISA *static feasibility* audit**, using the independently verified Native ELF without rebuilding or flashing. Record ELF/SDK/toolchain SHA, `readelf -A` attributes, link flags and representative disassembly. Distinguish compiler target configuration and low-overhead-loop `DLS/LE` from genuine MVE SIMD usage (e.g. vector predicate and lane operations). Prepare matched workload and measurement gates afterwards. Do not compare this unmatched historical SSCMA runtime against Native as a framework performance delta.
 
 The startup audit is **CLOSED AT STATIC ELF LEVEL**; hardware/boot/retention validation remains explicitly open.
+
+## 2026-10-15: Native Cortex-M55 / Helium (MVE) and Ethos-U55 ELF static audit
+
+**Artifacts inspected (user-supplied, host-only):**
+- Native `readelf -A` output `elf-attributes.txt`
+- Native `arm-none-eabi-objdump -d -C` output `native-disassembly.txt` (57,512 lines, full text inspected)
+- Native `arm-none-eabi-nm -C --defined-only` output `native-symbols.txt`
+- Native build manifest was checked for ELF SHA-256 equality by the user's PowerShell script before those reports were produced. The reports themselves were not independently SHA-bound to the ELF, so **do not claim a separately verified hash of the disassembly text**.
+
+**ISA attributes from `readelf -A`:** `Tag_CPU_name="cortex-m55"`, `Tag_CPU_arch=v8.1-M.mainline`, `Tag_FP_arch=FPv5/FP-D16 for ARMv8`, `Tag_ABI_VFP_args=VFP registers`, `Tag_DSP_extension=Allowed`, `Tag_MVE_arch=MVE Integer and FP`. ELF ISA attributes establish configured ISA support, **not** an executed SIMD workload or real hardware support validation.
+
+### Compiled Q-register MVE instructions: POSITIVE
+
+A line-by-line strict scan of the complete provided `objdump -d -C` output parsed 51,545 instruction lines and found **122 instructions with explicit `q0`–`q7` operands**, across **15 symbol-labelled functions**. This is a **lower bound for visible Q-register instructions, not a full MVE ISA count**. 94 of these appear inside `FastImageResize_BGR8U3C_to_RGB24_helium` (`0x1001A4C8`). Confirmed examples:
+
+| Address | Disassembled instruction | Meaning |
+|---|---|---|
+| `0x1001A518` | `vdup.32 q2, r5` | broadcast scalar into vector |
+| `0x1001A51C` | `vadd.i32 q2, q2, q6` | integer SIMD addition |
+| `0x1001A524` | `vcvt.f32.u32 q2, q2` | vector integer-to-float conversion |
+| `0x1001A642` | `vmul.f32 q3, q3, q4` | vector floating-point multiplication |
+| `0x1001A64A` | `vadd.f32 q3, q3, q1` | vector floating-point addition |
+
+Other Q-register functions include `scrfd_get_best_face` (3 Q-register operations) and several peripheral/driver functions. `dls`/`le` are Low Overhead Loop ISA and must **not** be confused with a vectorized SIMD loop or throughput.
+
+**Disassembly caveat:** some instruction words inside the Helium resize routine are printed by this GNU objdump as coprocessor instructions (`ldc`, `stc`, `cdp`). Their exact opcode identities and any vector memory/predicate operations should **not** be inferred from the text without a separately verified MVE-aware decode of the original ELF. Absence of textual `vldrw/vstrw/vctp/vpst` is not proof those encodings are absent.
+
+**Application call chain shown by actual BL instructions:**
+
+```text
+cv_face_embedding_run @ 0x100010B8
+  BL @ 0x10001190 -> hx_lib_image_resize_BGR8U3C_to_RGB24_helium @ 0x1001AA60
+  BL @ 0x1000122A -> tflite::MicroInterpreter::Invoke @ 0x10020428
+  BL @ 0x1000169E -> tflite::MicroInterpreter::Invoke @ 0x10020428
+
+hx_lib_image_resize_BGR8U3C_to_RGB24_helium
+  BL @ 0x1001AA88 -> calloc @ 0x1002357C
+  BL @ 0x1001AAA6 -> FastImageResize_BGR8U3C_to_RGB24_helium @ 0x1001A4C8
+  B.W @ 0x1001AAB6 -> free @ 0x100235C0
+```
+
+Thus the built Native face-embedding path can reach the vectorized resize kernel; its wrapper includes **per-invocation calloc/free operations**. This is a concrete performance/memory-fragmentation candidate, **not** evidence of a slowdown, memory leak or allocation failure on hardware. The helper appears to allocate a temporary buffer based on an argument; do not claim measured capacity, lifetime in cycles or whether the kernel fully vectorizes pixel loads/stores from current evidence.
+
+### Linked Ethos-U55 / TFLM route: POSITIVE at program-code level
+
+The native symbol table and disassembly identify:
+
+| Address | Function | Observed link/branch |
+|---|---|---|
+| `0x10005362` | `cv_face_embedding_init` | `BL 0x1001E2AC <ethosu_init>` |
+| `0x100057DC` | `cv_face_embedding_init` | `BL 0x100211F0 <tflite::Register_ETHOSU()>` |
+| `0x10005832` | `cv_face_embedding_init` | `BL 0x10020D48 <tflite::Register_L2_NORMALIZATION()>` |
+| `0x1000122A,0x1000169E` | `cv_face_embedding_run` | two `BL` sites to `MicroInterpreter::Invoke` |
+| `0x100211B8` | `tflite::(anonymous namespace)::Eval` | `BL 0x1001E830 <ethosu_invoke_v3>` |
+| `0x1001E842` | `ethosu_invoke_v3` | `BL 0x1001E588 <ethosu_invoke_async>` |
+| `0x1001E714` | `ethosu_invoke_async` | `BL 0x1001E93C <ethosu_dev_run_command_stream>` |
+| `0x1001E96C ... 0x1001E9A4` | `ethosu_dev_run_command_stream` | MMIO command stream register writes (source-level driver path present) |
+
+The `Register_ETHOSU()` literal at `0x10021228` contains `0x10021045`, the Thumb-tagged pointer to `tflite::(anonymous namespace)::Eval` at `0x10021044`, matching the registration function-pointers passed to `tflite::micro::RegisterOp`. The intermediate `MicroInterpreterGraph::InvokeSubgraph` invokes registered operators through **indirect calls**, so this is a linked and registered potential NPU invocation path, **not** proof of actual model dispatch, command stream execution or NPU throughput on a device.
+
+This confirms that TFLM, its Ethos-U custom-op registration and the Ethos-U driver are present in the Native ELF. It does **not** establish that a model is successfully loaded, an NPU inference completes, or that the separate SSCMA revision is slower/faster.
+
+### Engineering observations / next gate
+
+1. **Compiler/ISA capability:** ELF attribute confirms MVE Integer+FP allowed.
+2. **Compiled implementation:** explicit Q-register vector arithmetic present; Native resize BL chain reaches that function in the linked code.
+3. **NPU path:** `ethosu_init` call, Ethos-U TFLM registration, operator eval, and command-stream writer exist; actual operator invocation and hardware success remain unmeasured.
+4. **Potential costs to investigate when safe:** `calloc/free` each resize invocation; DMA/cache behavior; unknown number/effectiveness of vectorized load/store instructions; pixel preprocess scalar loops; RTOS scheduling not applicable to this Native bare-metal comparison without matched workloads.
+5. **No performance claim**: zero measured cycles, latency, speedup, energy, occupancy, cache misses or RTOS overhead. SDK versions and workloads differ; do not compare Native and SSCMA binaries numerically.
+
+**Next static evidence:** use a MVE-aware disassembler on the manifest-pinned original Native ELF and manually audit `FastImageResize` over `0x1001A4C8–0x1001AA60` (especially `ldc/stc/cdp` renderings). Separately review the Native image-processing call flow, allocation strategy and framebuffer memory placement. Only after recovery/flash safety is established should optional matched runtime benchmarks be designed. Keep Native vendor source and Watcher factory firmware untouched.
