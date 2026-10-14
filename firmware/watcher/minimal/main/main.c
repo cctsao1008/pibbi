@@ -42,6 +42,10 @@
 #define WATCHER_KNOB_A            GPIO_NUM_41
 #define WATCHER_KNOB_B            GPIO_NUM_42
 
+#ifdef PIBBI_LCD_PROBE
+extern esp_err_t pibbi_lcd_first_frame(void);
+#endif
+
 static const char *TAG = "pibbi";
 static int64_t app_entry_us = 0;
 
@@ -194,7 +198,18 @@ void app_main(void)
     ESP_ERROR_CHECK(watcher_power_init());
     ESP_ERROR_CHECK(watcher_knob_init());
     boot_mark("LOCAL_READY");
+#ifdef PIBBI_LCD_PROBE
+    boot_mark("LCD_INIT_START");
+    esp_err_t lcd_rc = pibbi_lcd_first_frame();
+    if (lcd_rc == ESP_OK) {
+        boot_mark("UI_READY");
+    } else {
+        ESP_LOGE(TAG, "B1b LCD first frame failed: %s", esp_err_to_name(lcd_rc));
+        boot_mark("UI_FAIL");
+    }
+#else
     ESP_LOGW(TAG, "B1a is UART + power/input only, NOT a display-ready firmware");
+#endif
 
     uint16_t raw = 0;
     esp_err_t read_rc = pca9535_read_input(&raw);
