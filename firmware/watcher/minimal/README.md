@@ -8,10 +8,10 @@ Independent ESP-IDF project for Watcher. Avoids the factory SenseCraft applicati
 
 Functional code in `main/main.c`:
 
-- Initialize ESP32-S3 I2C0 on GPIO47 (SDA), GPIO48 (SCL), 400 kHz.
+- Preserve Seeed's early external LCD/touch GPIO-low parking sequence, then initialize ESP32-S3 I2C0 on GPIO47 (SDA), GPIO48 (SCL), 400 kHz.
 - Address PCA9535 at I2C 0x21 and match Seeed's startup expander direction/output order.
 - Assert SYSTEM power hold first, then the original peripheral STARTUP mask with original 100 ms + 50 ms waits. The first build deliberately does **not** optimize the power-latch sequence.
-- Print `BOOT_MARK` records with `boot_us` (ESP-IDF boot timestamp) and `app_elapsed_us`; checkpoints: `APP_ENTER`, `I2C_READY`, `POWER_HOLD`, `POWER_PERIPHERALS`, `LOCAL_READY`, periodic `HEARTBEAT`.
+- Print `BOOT_MARK` records with `boot_us` (**microseconds since ESP timer initialization, not from power-button press**) and `app_elapsed_us` (since app_main); checkpoints: `APP_ENTER`, `EXTERNAL_IO_PARKED`, `I2C_READY`, `POWER_HOLD`, `POWER_PERIPHERALS`, `LOCAL_READY`, periodic `HEARTBEAT`.
 - Poll raw quadrature inputs GPIO41/GPIO42 and expander pin P0.3; log changes only. Raw input changes are **not** calibrated knob direction or button active level.
 
 **Not in B1a:** LCD initialization / first pixel, full knob UI, autonomous core on ESP32, Himax AI pipeline, microphones, speech, WLAN or Ethernet, factory firmware restoration. `LOCAL_READY` currently means **minimal power/input task ready**, not display ready. These are separate milestones.
