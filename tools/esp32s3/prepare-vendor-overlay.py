@@ -192,6 +192,47 @@ def correct(rel: str, data: str) -> tuple[str, list[str]]:
         fix("static esp_timer_handle_t rgb_timer_handle;\n", "", 1)
         fix("static uint8_t flag = 0;\n", "", 1)
 
+    # Remove compiler-identified dead locals and preserve side effects.
+    if rel == "app/app_wifi.c":
+        fix("static EventGroupHandle_t __wifi_event_group;\n", "", 1)
+        fix("    uint32_t ulNotificationValue;\n", "", 1)
+    elif rel == "app/app_device_info.c":
+        fix("static StackType_t *app_device_info_task_stack = NULL;\n", "", 1)
+        fix("static StaticTask_t app_device_info_task_buffer;\n", "", 1)
+        fix("static sscma_client_info_t *g_himax_info;\n", "", 1)
+        fix("    uint8_t code[8];\n", "", 1)
+        fix("    uint32_t cnt = 0;\n", "", 1)
+    elif rel == "app/app_cmd.c":
+        fix("    int write_len = 0;\n", "", 1)
+        fix("static int vi_ctrl_cmd(int argc, char **argv)\n{\n    char file[32] = {0};\n    char file_wav[32] = {0};\n    int record_time = 0;", "static int vi_ctrl_cmd(int argc, char **argv)\n{\n    char file[32] = {0};", 1)
+    elif rel == "app/app_ota.c":
+        fix("            int num_orders = cJSON_GetArraySize(orders);\n", "", 1)
+    elif rel == "app/app_audio_player.c":
+        fix("            UBaseType_t available_bytes = 0;\n", "", 1)
+    elif rel == "view/ui_manager/ui_events.c":
+        fix("static struct view_data_setting_switch set_sw;\n", "", 1)
+        fix("static struct view_data_emoticon_display emo_disp;\n", "", 1)
+        fix("    lv_coord_t x = lv_obj_get_x(knob);\n", "", 1)
+        fix("    lv_coord_t y = lv_obj_get_y(knob);\n", "", 1)
+        fix("void ui_event_emoticonok(lv_event_t * e)\n{\n    lv_event_code_t event_code = lv_event_get_code(e);\n    lv_obj_t * target = lv_event_get_target(e);", "void ui_event_emoticonok(lv_event_t * e)\n{\n    lv_event_code_t event_code = lv_event_get_code(e);", 1)
+        fix("    lv_obj_t *push2talk_panel_child;\n", "", 1)
+    elif rel == "view/view.c":
+        fix("static uint8_t system_mode = 0;     // 0: normal; 1: sleep; 2: standby\n", "", 1)
+        fix("static uint32_t inactive_time = 0;\n", "", 1)
+        fix("                static bool load_flag;\n", "", 1)
+        fix("                lv_timer_t *timer = lv_timer_create(toggle_image_visibility, 500, NULL);", "                lv_timer_create(toggle_image_visibility, 500, NULL);", 1)
+        fix("                int * rgb_st = (int *)event_data;\n", "", 1)
+        fix("                int *sw = (int *)event_data;\n", "", 1)
+    elif rel == "task_flow_module/tf_module_local_alarm.c":
+        fix("        FILE *fp = NULL;\n", "", 1)
+        fix("        esp_err_t status = ESP_FAIL;\n", "", 1)
+    elif rel == "task_flow_module/tf_module_alarm_trigger.c":
+        fix("        uint8_t *p_audio = NULL;\n", "", 1)
+    elif rel == "task_flow_module/tf_module_img_analyzer.c":
+        fix("                uint8_t *p_audio = NULL;\n", "", 1)
+    elif rel == "task_flow_module/tf_module_ai_camera.c":
+        fix("    bool condition_check = true;\n", "", 1)
+
     # esp_event_post_to's fifth argument is size_t. NULL is a pointer and
     # generates -Wint-conversion; the intended payload length is zero.
     if rel.endswith(".c"):
