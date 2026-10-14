@@ -91,6 +91,40 @@ Expected result is that the legacy **source dependency check** becomes READY. Th
 
 **Do not** run `git -C third_party/sscma-example-we2 submodule checkout ...` against the original SDK, as that would change the provenance and violate the clean-tree invariant used by `build.ps1`.
 
+
+### Windows result: source-only audit PASS
+
+The user ran `prepare-sscma-legacy.ps1` and the `--sdk-root` audit on Windows:
+
+- Isolated SDK worktree: `37fed7a8e27b9d50f64b6784c3aff7bbf04cf70d`
+- SSCMA-Micro: `c90065ddd2d763728b0aa24902af9337922b94fb`
+- **SSCMA source READY**, no firmware build or flash.
+- Legacy worktree reports Native BLOCKED / ELF NOT_FOUND as expected: these are distinct SDK revisions. The separate current Native baseline remains ELF VERIFIED.
+
+### Next gate: guarded SSCMA Watcher compile/link (ELF only)
+
+The research branch includes `tools/hx6538/build-sscma-legacy.ps1`. From the project root:
+
+```powershell
+git pull --ff-only
+.\tools\hx6538\build-sscma-legacy.ps1
+```
+
+The wrapper refuses to run unless the primary Native SDK, isolated SSCMA SDK and SSCMA-Micro checkout match their reviewed Git SHA values and are clean. It then runs clean/build in the isolated legacy SDK with explicit `TARGET=SENSECAP_WATCHER`, `APP_TYPE=sscma`, GNU toolchain, `OLEVEL=O2`, `MAP=1` and Watcher-target C/C++ defines.
+
+**Outputs if successful** (in a new ignored run directory `artifacts/hx6538/build-sscma-legacy/<run-id>/`):
+
+- `sscma-watcher.elf`, `sscma-watcher.elf.map`
+- `sections-size.txt`, `sections-readelf.txt`
+- `build.log`, `build-manifest.json` (SHA provenance)
+
+This script **does not** generate or flash a signed image, or touch COM32. It is not a firmware compatibility or performance test. Compile failures are valuable evidence: retain the log, do not change SDK versions or libraries ad hoc. Newly added script is pending execution on the user's Windows machine.
+
+### Important comparison qualification
+
+Even if this older SSCMA firmware builds, it is paired to a **different SDK revision** from the verified Native ELF. An absolute code/RAM size comparison at this stage would confound different library, compiler option, workload and linker choices. It establishes build feasibility; a controlled same-revision benchmark would require a subsequent matched experiment.
+
+
 ## Proposed *actual* comparison after repairing SSCMA dependencies
 
 Use the same checkout commit, Arm GNU Toolchain, optimization settings, clock, selected target package, and measurement conditions. Build configurations must have distinct artifact directories and hashes, with a clean rebuild between them; never overwrite the native `build-manifest.json` used by `image.ps1`.
