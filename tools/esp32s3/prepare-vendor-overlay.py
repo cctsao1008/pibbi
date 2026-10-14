@@ -156,10 +156,11 @@ def correct(rel: str, data: str) -> tuple[str, list[str]]:
             return re.sub(r",\s*NULL,\s*NULL,\s*(?=pdMS_TO_TICKS\s*\()",
                           ", NULL, 0, ", call)
 
-        data, n = re.subn(r"\besp_event_post_to\s*\(.*?\);",
-                          lambda m: event_fix(m), data, flags=re.DOTALL)
-        # Count changed calls rather than every existing event post.
-        # Script remains deterministic even for upstream patches without matches.
+        previous = data
+        data = re.sub(r"\besp_event_post_to\s*\(.*?\);",
+                      event_fix, data, flags=re.DOTALL)
+        if data != previous:
+            changes.append("zero-length ESP event payloads use size 0")
 
     return data, changes
 
@@ -184,7 +185,7 @@ def main() -> int:
         out = output / rel
         raw = p.read_bytes()
         if p.suffix in (".c", ".h"):
-            decoded = raw.decode("utf-8")
+            decoded = raw.decode("utf-8").replace("\r\n", "\n")
             corrected, details = correct(rel, decoded)
             raw = corrected.encode("utf-8")
             if details:
