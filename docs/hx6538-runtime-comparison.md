@@ -125,6 +125,59 @@ This script **does not** generate or flash a signed image, or touch COM32. It is
 Even if this older SSCMA firmware builds, it is paired to a **different SDK revision** from the verified Native ELF. An absolute code/RAM size comparison at this stage would confound different library, compiler option, workload and linker choices. It establishes build feasibility; a controlled same-revision benchmark would require a subsequent matched experiment.
 
 
+## Verified Windows build: legacy SSCMA Watcher ELF + MAP PASS
+
+User ran `tools/hx6538/build-sscma-legacy.ps1` successfully with the isolated historically paired sources (target `SENSECAP_WATCHER`). Output recorded by the user:
+
+```text
+CM55M_S_APP_ROM:   207416 B / 256 KiB (79.12%)
+CM55M_S_APP_DATA:  198728 B / 256 KiB (75.81%)
+CM55M_S_SRAM:      336 KiB / 336 KiB (100.00%)
+CM55M_S_EL_ALLOC: 1112 KiB /1112 KiB (100.00%)
+
+arm-none-eabi-size
+text     data     bss      dec
+376005   2676     1510191  1888872
+```
+
+Artefacts exist on the user's Windows computer at:
+`artifacts/hx6538/build-sscma-legacy/20261014T212931104Z-ad823da6/`, including:
+`sscma-watcher.elf`, `sscma-watcher.elf.map`, `sections-size.txt`,
+`sections-readelf.txt`, `build.log`, `build-manifest.json`.
+
+### Interpretation and limitations
+
+- **Build/link PASS** confirms the legacy source pair is compilers/linker-compatible with the pinned Arm GNU environment and Watcher-target build definition. It does **not** establish a flash-safe image or running firmware.
+- The `watcher.ld` linker places section `.elHeap` in `CM55M_S_EL_ALLOC` and `.ucHeap` in `CM55M_S_SRAM`. Both regions reporting **100%** is **statically reserved address space**, not proof that runtime allocations exhausted the respective pools. The former is 1112 KiB; the latter 336 KiB. The legacy WE2 `el_config_porting.h` configures `CONFIG_SSCMA_TENSOR_ARENA_SIZE (1110 * 1024)`; allocation details and `elHeap` symbol ownership must be verified from the generated MAP rather than inferred solely from the name. Legacy FreeRTOS NTZ config declares `configTOTAL_HEAP_SIZE (336 * 1024)`; confirm the effective selected OS build configuration and heap symbol in the MAP before asserting the live RTOS heap size.
+- `watcher.ld` also routes `.text.ext` (selected library code) to `CM55M_S_APP_DATA`, **not just ROM**. Consequently, raw ELF `text=376005` must not be compared directly against the 256 KiB `CM55M_S_APP_ROM` capacity.
+- ROM headroom by the linker report is **54728 B (53.45 KiB)**; APP_DATA headroom is **63416 B (61.93 KiB)**. These are *linker-region* margins, not a safe guarantee of extra runtime allocations.
+- 336 KiB + 1112 KiB = **1482752 B** reserved in the two named SRAM regions, accounting for most of the aggregate `bss=1510191 B`; remaining BSS and section accounting must be read from the MAP.
+- Native ELF passed hash verification under the **different** SDK revision `3ac4e9f5...`; legacy SSCMA ELF is under `37fed7a8...`. Treat this as *two independently buildable applications*, not controlled evidence that SSCMA uses more RAM or is slower.
+
+### Next source/ELF-only diagnostics
+
+Without flashing anything, inspect the locally generated `sections-size.txt` and MAP:
+
+```powershell
+$run = '.\artifacts\hx6538\build-sscma-legacy\20261014T212931104Z-ad823da6'
+Select-String -Path "$run\sections-size.txt" -Pattern 'elHeap|ucHeap|text.ext|\.text|\.bss|\.data|rodata'
+Select-String -Path "$run\sscma-watcher.elf.map" -Pattern '^\.(elHeap|ucHeap|text.ext|text|bss|data)\b' -Context 0,3
+```
+
+Use the MAP and `arm-none-eabi-nm --print-size --size-sort` (or readelf symbol table) to find the exact backing symbols and top static-memory consumers. Later, collect runtime heap free/min-ever-free and stack high-water data on a recovery-safe deployment; no inferences about runtime RAM from this link output.
+
+### Status gates
+
+| Gate | State |
+|---|---|
+| Current Native ELF build + manifest | **VERIFIED** |
+| Historical SSCMA source pairing | **VERIFIED** |
+| Historical Watcher SSCMA compile + link | **PASS (user Windows build)** |
+| Matched-revision memory/perf comparison | **NOT DONE** |
+| Watcher custom firmware boot / crash recovery | **NOT DONE** |
+| HX6538 hardware MVE / NPU / CDM runtime benchmark | **NOT DONE** |
+| Flashing | **NOT AUTHORIZED / NOT DONE** |
+
 ## Proposed *actual* comparison after repairing SSCMA dependencies
 
 Use the same checkout commit, Arm GNU Toolchain, optimization settings, clock, selected target package, and measurement conditions. Build configurations must have distinct artifact directories and hashes, with a clean rebuild between them; never overwrite the native `build-manifest.json` used by `image.ps1`.
