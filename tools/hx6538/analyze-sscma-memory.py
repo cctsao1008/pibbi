@@ -106,6 +106,57 @@ def parse_map_sections(text):
     return out
 
 
+def parse_program_headers(output):
+    """Parse readelf -W -l headers and Section-to-Segment mapping.
+
+    ELF PT_LOAD FileSiz and MemSiz are declarative ELF loader requirements.
+    Embedded signed-image generation and actual initialization are separate.
+    """
+    headers = []
+    mapping = {}
+    in_mapping = False
+    for line in output.splitlines():
+        if "Section to Segment mapping:" in line:
+            in_mapping = True
+            continue
+        if in_mapping:
+            m = re.match(r"^\\s*(\\d+)\\s+(.*)$", line)
+            if m:
+                mapping[int(m.group(1))] = m.group(2).split()
+            continue
+        parts = line.split()
+        if len(parts) >= 8 and parts[0] in {
+            "LOAD", "EXIDX", "NOTE", "DYNAMIC", "INTERP", "PHDR", "TLS",
+            "GNU_STACK", "GNU_RELRO",
+        }:
+            if not all(x.startswith("0x") for x in parts[1:6]) or not parts[-1].startswith("0x"):
+                continue
+            values = [int(x, 16) for x in parts[1:6]]
+            headers.append({
+                "index": len(headers), "type": parts[0],
+                "offset_bytes": values[0],
+                "vma": "0x{:08x}".format(values[1]),
+                "paddr": "0x{:08x}".format(values[2]),
+                "filesz_bytes": values[3], "memsz_bytes": values[4],
+                "flags": "".join(parts[6:-1]),
+                "align_bytes": int(parts[-1], 16),
+            })
+    for header in headers:
+        header["sections"] = mapping.get(header["index"], [])
+    loads = [h for h in headers if h["type"] == "LOAD"]
+    if not loads:
+        raise ValueError("No ELF PT_LOAD headers parsed from readelf -W -l")
+    return {
+        "headers": headers, "loads": loads,
+        "total_filesz_bytes": sum(h["filesz_bytes"] for h in loads),
+        "total_memsz_bytes": sum(h["memsz_bytes"] for h in loads),
+        "total_memory_only_bytes": sum(h["memsz_bytes"] - h["filesz_bytes"] for h in loads),
+        "load_map_excludes_copy_reservations": all(
+            name not in h["sections"] for h in headers for name in (".heap", ".stack")
+        ),
+    }
+
+
 def parse_linker_symbols(map_text, nm_text):
     names = ("__HeapBase", "__HeapLimit", "__StackLimit", "__StackTop")
     values = {}
@@ -143,6 +194,7 @@ def make_report(run_dir, prefix):
     nm_text = run([prefix + "nm", "-S", "--size-sort", "--radix=d", "--demangle", str(elf)])
     ph_text = run([prefix + "readelf", "-W", "-l", str(elf)])
     map_text = map_file.read_text(encoding="utf-8", errors="replace")
+    program_headers = parse_program_headers(ph_text)
     sections = parse_sections(obj_text)
     map_sections = parse_map_sections(map_text)
     symbols = parse_symbols(nm_text)
@@ -170,6 +222,7 @@ def make_report(run_dir, prefix):
         "sdk_sha": SDK_SHA, "source_run": str(run_dir),
         "elf_sha256": digest(elf), "map_sha256": digest(map_file),
         "regions": region_info, "sections": sections, "map_sections": map_sections,
+        "program_headers": program_headers,
         "largest_symbols": symbols[:50], "heap_symbols": heap_symbols,
         "linker_heap_stack": linker, "warnings": warnings,
         "runtime_heap_status": "NOT_MEASURED", "hardware_execution": "NOT_ATTEMPTED",
@@ -191,6 +244,22 @@ def markdown(report):
     for s in report["sections"]:
         if s["name"] in IMPORTANT:
             lines.append("| {name} | {vma} | {lma} | {size_bytes} | {region} | {has_file_contents} | {allocated} |".format(**s))
+    ph = report["program_headers"]
+    lines.extend(["", "## ELF PT_LOAD program headers", "",
+                  "| PT index | VMA / PAddr | FileSiz (B) | MemSiz (B) | Flags | Sections |",
+                  "|---|---|---:|---:|---|---|"])
+    for h in ph["loads"]:
+        lines.append("| {} | {} / {} | {} | {} | {} | {} |".format(
+            h["index"], h["vma"], h["paddr"], h["filesz_bytes"],
+            h["memsz_bytes"], h["flags"], ", ".join(h["sections"])))
+    lines.extend(["",
+                  "- Sum of PT_LOAD FileSiz: {} B (not an image or ELF file size)".format(ph["total_filesz_bytes"]),
+                  "- Sum of PT_LOAD MemSiz: {} B".format(ph["total_memsz_bytes"]),
+                  "- PT_LOAD memory-only difference: {} B".format(ph["total_memory_only_bytes"]),
+                  "- COPY .heap/.stack excluded from segment mapping: {}".format(
+                      ph["load_map_excludes_copy_reservations"]),
+                  "- PT_LOAD describes ELF requirements, not proof of HX6538 secure-loader execution."])
+
     lines.extend(["", "## Linker MAP output sections (including COPY reservations)", "",
                   "| MAP section | VMA | Size (B) | Region |", "|---|---|---:|---|"])
     for s in report["map_sections"]:
