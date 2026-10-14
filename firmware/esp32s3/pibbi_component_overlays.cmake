@@ -37,6 +37,17 @@ function(pibbi_override_component_source component source_name replacement)
     message(STATUS "pibbi patched component source: ${component}/${source_name}")
 endfunction()
 
+# Seeed's public sensecap-watcher.h includes esp_lvgl_port.h, but the pinned
+# BSP's CMake REQUIRES omits esp_lvgl_port and its manifest does not mark the
+# esp_lvgl_port dependency public. Consumers of sensecap-watcher consequently
+# lack the header's include directory. Restore the PUBLIC component dependency
+# here, without modifying the pinned upstream component or generated sources.
+idf_component_get_property(pibbi_watcher_lib sensecap-watcher COMPONENT_LIB)
+if(NOT TARGET "${pibbi_watcher_lib}" OR NOT TARGET idf::esp_lvgl_port)
+    message(FATAL_ERROR "pibbi: sensecap-watcher or esp_lvgl_port component missing")
+endif()
+target_link_libraries("${pibbi_watcher_lib}" PUBLIC idf::esp_lvgl_port)
+
 set(pibbi_comp_overlay "${CMAKE_CURRENT_LIST_DIR}/vendor_overlay/components")
 pibbi_override_component_source(
     esp_lvgl_port esp_lvgl_port.c
