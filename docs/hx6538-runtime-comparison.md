@@ -63,6 +63,34 @@ For an independently verified native build with the existing wrapper:
 
 Do not try to force a SSCMA image build by swapping arbitrary submodule versions until the source dependency is resolved and the target-specific board port is reviewed.
 
+## Update: a historically matched legacy SSCMA source pair was located
+
+The source gap is caused by an **API-generation mismatch**, not evidence that the Watcher WE2 port is unpublished.
+
+- `sscma-example-we2/1.0.x` at `3ac4e9f5...` retains an older SSCMA application: `sscma.cpp` includes `sscma/main_task.hpp`, and `sscma.mk` includes `porting/himax/we2` and `sscma/callback`.
+- Its recorded SSCMA-Micro gitlink, `c7ed52af...`, comes from the **new** API generation (commit dated 2025-10-27), where the matching legacy paths are absent.
+- `SSCMA-Micro/1.0.x` at `ff48a1c0...` (2025-01-02) **does** contain those legacy paths and a SenseCAP Watcher WE2 board port.
+- More compelling: [`sscma-example-we2/b/1.0.x`](https://github.com/Seeed-Studio/sscma-example-we2/tree/b/1.0.x) at `37fed7a8e27b9d50f64b6784c3aff7bbf04cf70d` pins `SSCMA-Micro` at `c90065ddd2d763728b0aa24902af9337922b94fb`. Its `sscma.cpp` is the **exact same Git blob SHA** as `sscma-example-we2/1.0.x` (`894a84e490b6499fde89ad96ece9b9559bfce01b`). The legacy submodule contains the missing header, WE2 port, and callbacks.
+- These are **source-level compatibility indicators only**. They do not prove the older pair builds, runs on Watcher, or produces behavior/performance equivalent to factory 2024.08.16 SSCMA.
+
+### Isolated source-only checkout (safe, no flash)
+
+Run in `D:\my-github\pibbi` from the pibbi research branch:
+
+```powershell
+git pull --ff-only
+.\tools\hx6538\prepare-sscma-legacy.ps1
+py .\tools\hx6538\audit-build-matrix.py `
+  --sdk-root .\.tools\work\hx6538-sscma-legacy `
+  --output .\artifacts\hx6538\analysis\legacy-sscma-audit.json
+```
+
+The helper validates the currently pinned SDK HEAD and clean working tree, fetches the historical Seeed branch, then creates a *separate detached Git worktree* under ignored `.tools/work/` with its matching historical SSCMA-Micro submodule. It fails closed if reviewed upstream branch or submodule commits do not match, does not build or flash anything, and never changes the original SDK source files.
+
+Expected result is that the legacy **source dependency check** becomes READY. The native ELF remains independently verified in the current pinned SDK, not the historical worktree. An actual comparative benchmark must still be conducted at one controlled SDK revision.
+
+**Do not** run `git -C third_party/sscma-example-we2 submodule checkout ...` against the original SDK, as that would change the provenance and violate the clean-tree invariant used by `build.ps1`.
+
 ## Proposed *actual* comparison after repairing SSCMA dependencies
 
 Use the same checkout commit, Arm GNU Toolchain, optimization settings, clock, selected target package, and measurement conditions. Build configurations must have distinct artifact directories and hashes, with a clean rebuild between them; never overwrite the native `build-manifest.json` used by `image.ps1`.
