@@ -67,3 +67,28 @@ Sequentially test: (a) power-hold + UART heartbeat, (b) LCD first frame and knob
 ## Decision
 
 The new architectural priority is a small pibbi-first Watcher firmware; the previous Watcher HTTP Push G1 path is optional historical integration, not required critical path. This is not a claim that custom firmware will definitely solve slow boot. Gate B0 provides causality evidence; B1 proves build feasibility; B2 prevents irreversible loss of factory data; B3 measures actual improvement.
+
+
+## Windows gated builds — 2026-10-15
+
+**B1a:** Windows ESP-IDF v5.2.1 BUILD_PASS, BIN 0x3B420 = 242,720 B; ELF SHA256 092976B9CFC152F5F47E747219E6A76D06BE7254CDD16920DE870AFA570E808D.
+
+**B1b:** Windows ESP-IDF v5.2.1 BUILD_PASS_B1B, BIN 0x48BB0 = 297,904 B; ELF SHA256 12AEEAE96AEA53652DA76F2F12870495017E9B583A9B7C36328960678B096F55. The build had one harmless vendor_config const-qualification warning at lcd_first_frame.c:160; source fix committed d42c2593, but **corrected image has not yet been rebuilt**.
+
+The generated images fit the build project's *source-selected* 12 MiB app partition, NOT verified device layout. Neither has been flashed; no physical boot/UI/latency measurements.
+
+## Gate B2a — read-only actual device partition inspection
+
+New read-only script: tools/watcher/read-partitions.ps1. It invokes Espressif esptool v4 read_flash for exactly 4096 B starting at 0x8000 (expected factory partition-table location) and converts binary to CSV with the activated ESP-IDF gen_esp32part.py. It never reads factory NVS, writes flash, erases flash or burns eFuses; **the ROM loader connection can reset the device**.
+
+From ESP-IDF v5.2.1 PowerShell with the CONFIRMED ESP32-S3 USB data/programming port (not HX6538):
+
+    cd D:\my-github\pibbi
+    git pull --ff-only
+    .\tools\watcher\read-partitions.ps1 -Port COMxx
+
+Replace COMxx with actual ESP32-S3 serial COM name. If two ports exist and device identity is uncertain, identify the correct port before running the script. Successful output: READ_ONLY_PARTITION_PASS, actual partition metadata and binary SHA-256. Files saved under ignored private artifacts/pibbi/watcher-b2-readonly/<timestamp>. Share partition table and hash only; do NOT share unique MAC, EUI, factory NVS, credential backups, bootloader binaries, or private logs.
+
+Documented Espressif commands: [read_flash](https://docs.espressif.com/projects/esptool/en/release-v4/esp32s3/esptool/basic-commands.html), [binary partition decoding](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-guides/partition-tables.html).
+
+A valid partition table is B2a evidence ONLY. B2b: check Secure Boot / Flash Encryption security status read-only, safeguard NVS and other unique factory data, verify available recovery binaries, restore viability and receive **separate explicit authorization** before ANY application flash. If reading/decode fails, STOP instead of trying erase, forced flash, or a guessed partition offset.
