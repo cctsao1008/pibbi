@@ -92,3 +92,25 @@ Replace COMxx with actual ESP32-S3 serial COM name. If two ports exist and devic
 Documented Espressif commands: [read_flash](https://docs.espressif.com/projects/esptool/en/release-v4/esp32s3/esptool/basic-commands.html), [binary partition decoding](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-guides/partition-tables.html).
 
 A valid partition table is B2a evidence ONLY. B2b: check Secure Boot / Flash Encryption security status read-only, safeguard NVS and other unique factory data, verify available recovery binaries, restore viability and receive **separate explicit authorization** before ANY application flash. If reading/decode fails, STOP instead of trying erase, forced flash, or a guessed partition offset.
+
+## Gate B2a real partition table — 2026-10-16 PASS
+
+ESP32-S3 read-only serial dump: physical flash 0x8000..0x8FFF is a valid table. SHA256 535EA803C19353B47BACEA78DE4642692920CD925402233666FF9E7EB9189D73.
+
+Actual layout: nvsfactory 0x9000/200KiB, nvs 0x3B000/840KiB, otadata 0x10D000/8KiB, phy_init 0x10F000/4KiB, ota_0 0x110000/12MiB, ota_1 0xD10000/12MiB, model 0x1910000/1MiB, storage 0x1A10000/6080KiB. All 8 rows match the B1b build project partition table. No unique chip identifiers or NVS payloads published.
+
+Partition table match is not proof that replacing the active application is presently safe.
+
+## Gate B2b — ROM security flags (READ-ONLY, pending)
+
+The official ESP32-S3 ROM offers GET_SECURITY_INFO. The guarded PowerShell script tools/watcher/read-security.ps1 calls only esptool with --no-stub get_security_info and does not request eFuse burning, Flash writes, or factory NVS data. The serial downloader may reset Watcher.
+
+Run from the ESP-IDF v5.2.1 PowerShell (confirmed ESP32-S3 COM31):
+
+    cd D:\my-github\pibbi
+    git pull --ff-only
+    .\tools\watcher\read-security.ps1 -Port COM31
+
+Redact device MAC/unique identifiers before sharing console output. Evaluate Secure Boot, Flash Encryption and secure-download restrictions; if fields are ambiguous, do not assume disabled. Continue separate active-OTA identification, private factory data backup and restore validation before any flash. No app-only write authorization has been given.
+
+See [Espressif ROM serial protocol](https://docs.espressif.com/projects/esptool/en/release-v4/esp32s3/advanced-topics/serial-protocol.html) and [Flash Encryption restrictions](https://docs.espressif.com/projects/esp-idf/en/v5.2.1/esp32s3/security/flash-encryption.html).
