@@ -159,3 +159,30 @@ The output's inferred_boot_candidate is a **prediction from OTA metadata**, NOT 
 Vendor references: [ESP-IDF v5.2.1 esp_flash_partitions.h](https://github.com/espressif/esp-idf/blob/v5.2.1/components/bootloader_support/include/esp_flash_partitions.h), [bootloader_common_loader.c](https://github.com/espressif/esp-idf/blob/v5.2.1/components/bootloader_support/src/bootloader_common_loader.c), [bootloader_utility.c](https://github.com/espressif/esp-idf/blob/v5.2.1/components/bootloader_support/src/bootloader_utility.c), [otatool.py](https://github.com/espressif/esp-idf/blob/v5.2.1/components/app_update/otatool.py).
 
 Report the sanitized JSON only; never share the backup or manifest. B2 remains OPEN until an independent factory rollback route and first-write approval exist.
+
+## Gate B2d physical-unit backup's offline inspection — PASS, 2026-10-16
+
+User executed the B2d script on their private Windows backup. OFFLINE_BACKUP_INTEGRITY_PASS: full 32 MiB SHA `347E603A855C545541FE5FB56A1620229C4365BDD1D167B63AF00A8F945DF282`, partition SHA `535EA803C19353B47BACEA78DE4642692920CD925402233666FF9E7EB9189D73`, independent local copies MATCH.
+
+OTA metadata: sector 0: seq=1, state VALID, CRC true, selectable; sector 1: erased/UNDEFINED/nonselectable. **Candidate ota_0**, offset 0x110000; `ota_0` has image magic E9, 6 segments. `ota_1` at 0xD10000 has **no plausible ESP image header**. This is NOT proof the entire ota_1 partition is erased. OTA candidate from backup is not conclusive proof of the running app. Image header alone does not verify the whole factory app image.
+
+### Deployment design — not yet authorized
+
+- Reserve ota_0 exclusively for the factory firmware and preserve nvsfactory, nvs, model, storage, bootloader, partition table, phy_init and factory otadata snapshot.
+- Future pibbi image target should be ota_1 at physical 0xD10000 (12 MiB). First independently verify full factory image, confirm current running slot in boot logs, prove manual recovery to factory via serial downloader, and review OTA metadata update/rollback strategy. The current 32 MiB private backup is not itself a proven restoration.
+- **Never run idf.py flash or idf.py app-flash using the current B1b build defaults**: the ESP-IDF generated commands use app target 0x110000 (ota_0) and full-flash commands additionally modify bootloader/partition table/OTA metadata. A direct app write to 0xD10000 alone would not automatically select ota_1 for boot.
+- Do not write to any device until a separately explicit approval for specific protected scope, offset and fallback exists.
+
+## Gate B2e — offline factory ota_0 full-image integrity, pending
+
+Source: [tools/watcher/verify-ota0-image-offline.py](../tools/watcher/verify-ota0-image-offline.py); [six parser tests](../tests/test_watcher_image_info_offline.py). This validates B2c complete backup hashes first, then runs locally installed Espressif esptool v4 `image_info --version 2` against a **temporary private ota_0 slice**. It reports only ESP32-S3 chip ID match, segment count, checksum validity, optional appended SHA-256 validity and status; it does not output app version, image data, credentials or private file paths. Temporary file is removed on normal exit. The vendor command does not use serial port.
+
+Run in ESP-IDF v5.2.1 PowerShell at repository root:
+
+    git pull --ff-only
+    py -m unittest discover -s .\tests -p 'test_watcher_image_info_offline.py' -v
+    python .\tools\watcher\verify-ota0-image-offline.py --backup-dir 'D:\pibbi-private-backups\watcher-private-20261016-053954-115'
+
+Expected success marker: IMAGE_CHECK_PASS with checksum_valid=true and appended_sha256 VALID, or NOT_APPENDED if a valid image explicitly states it has no appended SHA-256. Since the tool is new and not executed on the user's actual backup, no such result is claimed yet. If it returns IMAGE_CHECK_INCOMPLETE_OR_FAIL, STOP and do not flash; inspect failure locally. This is only static image integrity, not restored boot success.
+
+Source: [esptool v4.12.0 image_info implementation](https://github.com/espressif/esptool/blob/v4.12.0/esptool/cmds.py) and [CLI image_info regression tests](https://github.com/espressif/esptool/blob/v4.12.0/test/test_image_info.py).
