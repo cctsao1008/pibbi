@@ -211,3 +211,32 @@ Capture an unmodified *local* full boot log for your own comparison; share only 
 ### Non-negotiable deployment gate
 
 Do not use generic `idf.py flash`, `idf.py app-flash`, or copy the ESP-IDF printed `write_flash 0x110000` command: **that address is currently factory ota_0**. The only proposed pibbi target is ota_1 (0xD10000), but no write command or flash approval has been granted. Serial recovery and conservative OTA selection have not yet been demonstrated.
+
+## B2f + B2g confirmed by user's actual Watcher — 2026-10-16
+
+- **B2f PASS:** saved ota_1 12 MiB at 0xD10000 consists entirely of 0xFF; non-FF count zero in verified backup snapshot.
+- **B2g PASS:** read-only factory-style UART log shows bootloader selects and loads application at physical 0x110000 = **ota_0**. Factory-style app ran; this confirms actual slot in that boot, rather than relying solely on candidate inferred from OTA records.
+- **Provenance is OPEN:** app identifies project `pibbi_watcher`, version `d5c414c`, compile time Oct 15 2026 (not an untouched September 2024 OEM factory image), ESP-IDF v5.2.1. It is NOT our newly built B1a (`pibbi_watcher_minimal`) or B1b (`pibbi_watcher_lcd_probe`). Do not call the saved OTA0 image 'original factory firmware' until its origin is clarified; use 'preserved pre-pibbi-test firmware'.
+
+### Measured boot-time landmarks — ESP-IDF log clock
+
+| Stage | Boot timestamp |
+|---|---:|
+| Bootloader loaded current app from 0x110000 | 1.307 s |
+| app_main entered | 1.991 s |
+| I/O expander initialized | 3.026 s |
+| LVGL task and SPD2010 panel creation reported | 3.027–3.028 s |
+| PNG resource count reported (23) | 5.136 s |
+| Last printed PNG image load in provided capture | 31.681 s |
+
+**Interpretation:** ESP32 startup and LCD creation occur within ~3.0 s, but resource asset loading continues through >31 s. About **26.545 s** elapses between PNG enumeration (5.136 s) and the last visible PNG load (31.681 s). The transcript ends around 32.080 s, **without a UI_READY/first-user-interaction marker**. This is convincing evidence of a major asset-loading bottleneck, not an exact first-interactive-frame measurement. A separate SSCMA `INIT@STAT?` warning at 4.255 s needs independent investigation.
+
+### UART LOG SECURITY WARNING
+
+The provided raw UART boot output includes device-specific identification, QR provisioning content and authentication key fields. NEVER copy unredacted lines to GitHub, chat, issues or external services; treat exposed credentials as sensitive, assess/revoke/rotate them using the vendor service where feasible. This documentation deliberately contains no credential values, serial numbers, device keys, EUI, MAC or raw UART transcript.
+
+New conservative local [redact-boot-log.py](../tools/watcher/redact-boot-log.py) prints redacted UART text only to stdout, with [five synthetic tests](../tests/test_watcher_redact_boot_log.py). Its detection is not complete for unforeseen key formats: inspect sanitized output manually before any sharing.
+
+### Remaining deployment gate
+
+Use the existing preserved/private backup (32 MiB + original OTA metadata) and recoverability as immutable reference. Need: identify who/what built the ota_0 `pibbi_watcher` app; observe an interaction timing; select a verifiable OTA1-only app writer plus OTA metadata switching method with fallback to OTA0. No device write, OTA switch or full-flash replacement until separately approved.
