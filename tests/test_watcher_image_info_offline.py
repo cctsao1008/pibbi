@@ -29,7 +29,7 @@ class WatcherImageVerifierTests(unittest.TestCase):
         self.assertFalse(r["checksum_valid"])
 
     def test_invalid_hash_rejected(self):
-        r = parse_image_info(SAMPLE.replace(" (valid)\n", " (invalid)\n"), 0)
+        r = parse_image_info(SAMPLE.replace("a"*64 + " (valid)", "a"*64 + " (invalid)"), 0)
         self.assertEqual(r["status"], "IMAGE_CHECK_INCOMPLETE_OR_FAIL")
         self.assertEqual(r["appended_sha256"], "INVALID")
 
