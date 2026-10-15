@@ -150,7 +150,7 @@ esp_err_t pibbi_lcd_first_frame(void)
         return rc;
     }
 
-    const spd2010_vendor_config_t vendor_cfg = {
+    spd2010_vendor_config_t vendor_cfg = {
         .flags = {.use_qspi_interface = 1},
     };
     const esp_lcd_panel_dev_config_t panel_cfg = {
