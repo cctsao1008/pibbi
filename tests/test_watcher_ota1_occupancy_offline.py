@@ -12,7 +12,8 @@ class TestOta1Occupancy(unittest.TestCase):
     def test_all_ff_region(self):
         stream = io.BytesIO(b"\x00" * 10 + b"\xff" * 34 + b"\x00")
         r = scan_region(stream, 10, 34, chunk_size=7)
-        self.assertEqual(r["status"] if "status" in r else "SCAN_OK", "SCAN_OK")
+        self.assertEqual(r["offset"], "0xA")
+        self.assertEqual(r["length"], 34)
         self.assertTrue(r["fully_erased_all_ff"])
         self.assertEqual(r["non_ff_byte_count"], 0)
         self.assertIsNone(r["first_non_ff_offset"])
