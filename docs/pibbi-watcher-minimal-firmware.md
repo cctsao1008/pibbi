@@ -186,3 +186,28 @@ Run in ESP-IDF v5.2.1 PowerShell at repository root:
 Expected success marker: IMAGE_CHECK_PASS with checksum_valid=true and appended_sha256 VALID, or NOT_APPENDED if a valid image explicitly states it has no appended SHA-256. Since the tool is new and not executed on the user's actual backup, no such result is claimed yet. If it returns IMAGE_CHECK_INCOMPLETE_OR_FAIL, STOP and do not flash; inspect failure locally. This is only static image integrity, not restored boot success.
 
 Source: [esptool v4.12.0 image_info implementation](https://github.com/espressif/esptool/blob/v4.12.0/esptool/cmds.py) and [CLI image_info regression tests](https://github.com/espressif/esptool/blob/v4.12.0/test/test_image_info.py).
+
+## B2e result — original ota_0 image integrity PASS (2026-10-16)
+
+Actual user's offline `verify-ota0-image-offline.py` returned IMAGE_CHECK_PASS. esptool exit code 0; chip ID 9 verified ESP32-S3; 6 segments; image checksum valid; appended SHA-256 valid. This proves saved factory Application image bytes are internally valid. Not a live running-slot proof, boot validation, or restore test.
+
+## B2f offline ota_1 occupancy gate (PENDING)
+
+B2d reported that ota_1 lacks an ESP32 application header. That alone does not mean the whole OTA1 region is blank. The new offline-only [inspect-ota1-occupancy-offline.py](../tools/watcher/inspect-ota1-occupancy-offline.py) checks **every byte** in the backed-up 12 MiB ota_1 region 0xD10000..0x1910000; prints only number of non-FF bytes and their first/last offsets, never the content. It rechecks the private backup integrity first. Five synthetic regression tests in [test_watcher_ota1_occupancy_offline.py](../tests/test_watcher_ota1_occupancy_offline.py). User test run and occupancy output pending.
+
+    cd D:\my-github\pibbi
+    git pull --ff-only
+    py -m unittest discover -s .\tests -p 'test_watcher_ota1_occupancy_offline.py' -v
+    py .\tools\watcher\inspect-ota1-occupancy-offline.py --backup-dir 'D:\pibbi-private-backups\watcher-private-20261016-053954-115'
+
+If fully_erased_all_ff is false, STOP and review before declaring ota_1 safe to overwrite. If true, it is evidence about the **snapshot**, not guarantee of current device state; deployment still needs boot log and explicit user write consent.
+
+## B2g factory boot log confirmation (PENDING)
+
+Only serial monitor is needed; no flashing. The user's confirmed ESP32-S3 programming UART is COM31, but serial logging may differ by firmware. With pyserial installed, try `py -m serial.tools.miniterm COM31 115200`, then use the normal factory power cycling or restart procedure. Serial tools may toggle RTS/DTR and reset the board when opening; ensure factory timing baseline is captured before disruptive steps. Exit with Ctrl+].
+
+Capture an unmodified *local* full boot log for your own comparison; share only redacted lines that show bootloader OTA selection/app partition offset, errors, and early initialization timestamps. Do NOT upload Wi-Fi passwords, SSID, MAC, EUI, API tokens, private logs or raw NVS. If UART stays silent, verify correct debug port and baud before drawing conclusions. A bootloader line selecting ota_0 plus normal factory UI operation confirms original slot more strongly than metadata alone.
+
+### Non-negotiable deployment gate
+
+Do not use generic `idf.py flash`, `idf.py app-flash`, or copy the ESP-IDF printed `write_flash 0x110000` command: **that address is currently factory ota_0**. The only proposed pibbi target is ota_1 (0xD10000), but no write command or flash approval has been granted. Serial recovery and conservative OTA selection have not yet been demonstrated.
