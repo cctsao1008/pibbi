@@ -114,3 +114,25 @@ Run from the ESP-IDF v5.2.1 PowerShell (confirmed ESP32-S3 COM31):
 Redact device MAC/unique identifiers before sharing console output. Evaluate Secure Boot, Flash Encryption and secure-download restrictions; if fields are ambiguous, do not assume disabled. Continue separate active-OTA identification, private factory data backup and restore validation before any flash. No app-only write authorization has been given.
 
 See [Espressif ROM serial protocol](https://docs.espressif.com/projects/esptool/en/release-v4/esp32s3/advanced-topics/serial-protocol.html) and [Flash Encryption restrictions](https://docs.espressif.com/projects/esp-idf/en/v5.2.1/esp32s3/security/flash-encryption.html).
+
+## Gate B2b actual security result — 2026-10-16 PASS
+
+User ran the ESP32-S3 ROM-only get_security_info command on COM31. Flags 0x00000000, Secure Boot **Disabled**, Flash Encryption **Disabled**, SPI_BOOT_CRYPT_CNT 0x0. The queried key-purpose names were not secret key bytes. This status removes the two common ESP32 image signing/encryption obstacles for this particular device at inspection time. No eFuse write, Flash write, or chip-unique identifier has been committed.
+
+**B2b security result is NOT permission to flash.** Factory/OTA image contents, private factory identity, and rollback must still be safeguarded.
+
+## Gate B2c — verified private full ESP32-S3 backup (READ-ONLY; pending on device)
+
+Script: [tools/watcher/backup-esp32s3-readonly.ps1](../tools/watcher/backup-esp32s3-readonly.ps1) — safe only for the ESP32-S3 (does not access/backup Himax). It is a full **32 MiB** raw ESP32-S3 Flash read with SHA-256; it also rereads the 4 KiB partition table, 200 KiB factory NVS, and 8 KiB OTA metadata, comparing samples byte-for-byte against the full image. The known partition table hash is a device-layout guard (not unique device authentication). No erase/write commands.
+
+Store the resulting files **outside the Git repository and any cloud-sync folders**, preferably on a BitLocker-encrypted local drive. These binary files contain actual factory credentials/EUI and potentially Wi-Fi/network secrets. Never attach them to Issues, ChatGPT or commit them.
+
+Run after the current factory boot timing baseline has been recorded where possible, in the activated ESP-IDF v5.2.1 PowerShell:
+
+    cd D:\my-github\pibbi
+    git pull --ff-only
+    .\tools\watcher\backup-esp32s3-readonly.ps1 -Port COM31 -OutputDir 'D:\pibbi-private-backups'
+
+Change the output folder to a **private encrypted local drive** appropriate for your system. The script will create a unique timestamped subfolder and may take minutes; keep USB power/cable stable. It prints only file metadata/hash, but esptool may also report device identifiers in the console: redact before sharing. On success it prints READ_ONLY_BACKUP_PASS and INDEPENDENT_REGION_COMPARE_PASS plus full image SHA-256. If a checksum or read fails, STOP; do not try flash or erase.
+
+**Success means backup integrity, not restore proven.** Before app-only flash: separately decode active OTA slot from the private backup; confirm original factory app/bootloader are recoverable, plan and test a rollback procedure without touching protected partitions, check readiness of minimal LCD probe's actual runtime constraints, and obtain an explicit user approval for hardware writes. No ESP32 backup can substitute for HX6538 firmware backup if we later modify Himax.
