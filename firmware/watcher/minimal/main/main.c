@@ -177,7 +177,7 @@ static esp_err_t watcher_knob_init(void)
     const gpio_config_t config = {
         .pin_bit_mask = (1ULL << WATCHER_KNOB_A) | (1ULL << WATCHER_KNOB_B),
         .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
