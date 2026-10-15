@@ -25,7 +25,7 @@ Read-only observations completed 2026-10-16:
 4. Boot with UART capture. Expect an `esp_image`/bootloader line loading **0xD10000**. Then assess `BOOT_MARK stage=...` through `UI_READY`, visual first-frame rings, raw knob/button changes, and the 5s heartbeat. Check for `UI_FAIL`, restarts and power-hold failures.
 5. If UI is unusable or program restarts, return ROM download mode and switch OTA selection back to slot 0 using same official OTA tool; never erase NVS or write OTA0 for a normal rollback.
 
-**Writing has not been authorized by user yet and no writing script has been run.** User confirmation is needed before giving an operational one-time write procedure. The app test may fail even after Build PASS, especially the LCD/power control, so having UART and a serial recovery path is important.
+**The user explicitly authorized one OTA1 application write and OTA boot-selector change on 2026-10-16.** Guarded deployment and rollback scripts are now committed; the user must still run them locally. No physical write has been executed by the assistant. The app test may fail even after Build PASS, especially the LCD/power control, so having UART and a serial recovery path is important.
 
 ## Outcome and follow-up
 
@@ -34,3 +34,26 @@ First metric: time from `APP_ENTER` to `UI_READY`, measured by new B1b firmware 
 ## Sensitive logs
 
 Current image logs factory-like provisioning keys and identifiers at startup; redact all before public sharing. No credentials or full backups belong in this repo.
+
+## 2026-10-16 — minimal firmware deployment (user approved, script not executed)
+
+Minimal image source is already in firmware/watcher/lcd-probe, reusing B1a startup code; contains ONLY: ESP32-S3 board GPIO parking, I2C PCA9535 power-hold, bare SPI3/QSPI SPD2010 first frame, basic raw knob+button telemetry and BOOT_MARK timing. **No SenseCraft/Task Flow, PNG loader, LVGL, Wi-Fi, BLE, audio, cloud, HX6538 model or service init**. The existing Windows B1b build is PASS, size 297,904 B before any future rebuild.
+
+Guarded PowerShell deploy [tools/watcher/deploy-minimal-ota1.ps1](../tools/watcher/deploy-minimal-ota1.ps1): validates private backup integrity and 12 MiB OTA1 snapshot blank, compiled BIN image header/checksum/hash and live flash partition SHA, OTA metadata/current selected OTA0, live first 4 KiB OTA1 erased; invokes only esptool `write_flash --flash_mode keep --flash_freq keep --flash_size keep --verify 0xD10000 <app>`; then separately `verify_flash 0xD10000 <app>`. **Only after verification** uses official ESP-IDF v5.2.1 `otatool.py switch_ota_partition --slot 1`, which writes OTA metadata, and rereads the metadata to check OTA1 selection. Manual explicit `-Apply` required; without it performs no writes.
+
+Rollback [tools/watcher/restore-ota0-boot.ps1](../tools/watcher/restore-ota0-boot.ps1) uses the same partition guard, checks OTA0 image header, invokes official `otatool.py switch_ota_partition --slot 0`, verifies selection; modifies only otadata. It also requires `-Apply`. The original OTA0 user-built image is not touched by either script.
+
+**Run from ESP-IDF v5.2.1 PowerShell, with stable power/USB and no running COM31 miniterm:**
+
+    cd D:\my-github\pibbi
+    git pull --ff-only
+    .\tools\watcher\build-lcd-probe.ps1
+    .\tools\watcher\deploy-minimal-ota1.ps1 -Port COM31 -BackupDir 'D:\pibbi-private-backups\watcher-private-20261016-053954-115' -Apply
+
+Inspect the command output for `PRIVATE_BACKUP_AND_OTA1_SNAPSHOT_PASS`, `LIVE_PREFLIGHT_OTA0_SELECTED_OTA1_EMPTY_PASS`, `OTA1_APP_WRITE_VERIFY_PASS`, `OTA_BOOT_SELECTION_OTA1_PASS`, and `DEPLOY_OTA1_PASS`. After deployment, run `py -m serial.tools.miniterm COM31 115200`, restart the device, confirm boot offset **0xD10000**, then `BOOT_MARK ... UI_READY` and visible rings. If failure, close miniterm with Ctrl+] and perform:
+
+    .\tools\watcher\restore-ota0-boot.ps1 -Port COM31 -Apply
+
+After rollback confirm boot offset **0x110000**. The read-flash/OTA tool uses download mode; the Watcher may need manual BOOT/RESET if automatic reset cannot access the ROM. If COM31 cannot connect, **do not repeatedly flash/erase**; diagnose USB reset/boot first.
+
+Potential unresolved runtime risks: panel DMA callbacks, PCA9535 power sequence, SPI3 QSPI timing and backlight; a Build PASS is not a hardware display PASS. Thus UI_READY and first physical pixels must be measured on-device. The goal is fast pibbi minimal functionality, NOT OEM firmware restoration.
