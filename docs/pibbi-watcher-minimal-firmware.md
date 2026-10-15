@@ -136,3 +136,26 @@ Run after the current factory boot timing baseline has been recorded where possi
 Change the output folder to a **private encrypted local drive** appropriate for your system. The script will create a unique timestamped subfolder and may take minutes; keep USB power/cable stable. It prints only file metadata/hash, but esptool may also report device identifiers in the console: redact before sharing. On success it prints READ_ONLY_BACKUP_PASS and INDEPENDENT_REGION_COMPARE_PASS plus full image SHA-256. If a checksum or read fails, STOP; do not try flash or erase.
 
 **Success means backup integrity, not restore proven.** Before app-only flash: separately decode active OTA slot from the private backup; confirm original factory app/bootloader are recoverable, plan and test a rollback procedure without touching protected partitions, check readiness of minimal LCD probe's actual runtime constraints, and obtain an explicit user approval for hardware writes. No ESP32 backup can substitute for HX6538 firmware backup if we later modify Himax.
+
+## Gate B2c result — physical backup PASS (2026-10-16)
+
+The user's B2c read-only 32 MiB full ESP32-S3 Flash backup finished successfully. Size 33,554,432 bytes, SHA-256 `347E603A855C545541FE5FB56A1620229C4365BDD1D167B63AF00A8F945DF282`. The complete image was read in 852.7 s. Independently reread partition table (4096 B), nvsfactory (204,800 B) and otadata (8192 B), matching the same offsets byte-for-byte in the full image. Returned READ_ONLY_BACKUP_PASS and INDEPENDENT_REGION_COMPARE_PASS. These are **backup integrity evidence**, not proof of restoration or that HX6538 has been backed up.
+
+Sensitive backup files stay ONLY in the user's private Windows folder. Do not upload NVS or full image to this repository, GitHub issues, chat or online virus scanners.
+
+## Gate B2d — OFFLINE backup/OTA selection inspection
+
+Read-only local script: [tools/watcher/inspect-backup-offline.py](../tools/watcher/inspect-backup-offline.py); tests in [tests/test_watcher_ota_offline.py](../tests/test_watcher_ota_offline.py). Python standard library only, no COM or network, no file writes. The program checks full-flash hash against the private manifest, physical partition SHA, and byte equality with separately read NVS/OTA files. It displays only OTA sequence/state/CRC validity and whether each app slot has a plausible ESP image header; private partition contents remain opaque.
+
+Run from pibbi root in Windows PowerShell:
+
+    cd D:\my-github\pibbi
+    git pull --ff-only
+    py -m unittest discover -s .\tests -p 'test_watcher_ota_offline.py' -v
+    py .\tools\watcher\inspect-backup-offline.py --backup-dir 'D:\pibbi-private-backups\watcher-private-20261016-053954-115'
+
+The output's inferred_boot_candidate is a **prediction from OTA metadata**, NOT a proven active/running partition. It follows ESP-IDF v5.2.1's `esp_ota_select_entry_t` 32-byte structure (two 4 KiB-separated records), CRC with `binascii.crc32(pack('<I', ota_seq), 0xffffffff)`, invalid/aborted states, and sequence-to-slot mapping `(ota_seq-1)%2`. Rollback, bootloader image validity and possible custom boot behavior can change the actual running image. ESP image header detection is only a quick plausibility check; a header is not enough to establish image validity.
+
+Vendor references: [ESP-IDF v5.2.1 esp_flash_partitions.h](https://github.com/espressif/esp-idf/blob/v5.2.1/components/bootloader_support/include/esp_flash_partitions.h), [bootloader_common_loader.c](https://github.com/espressif/esp-idf/blob/v5.2.1/components/bootloader_support/src/bootloader_common_loader.c), [bootloader_utility.c](https://github.com/espressif/esp-idf/blob/v5.2.1/components/bootloader_support/src/bootloader_utility.c), [otatool.py](https://github.com/espressif/esp-idf/blob/v5.2.1/components/app_update/otatool.py).
+
+Report the sanitized JSON only; never share the backup or manifest. B2 remains OPEN until an independent factory rollback route and first-write approval exist.
