@@ -58,7 +58,8 @@ static void rgb_task(void *arg)
                 phase = 0;
                 ESP_LOGI(TAG, "RGB_MODE=%s",
                          mode == PIBBI_RGB_BOOT ? "BOOT" :
-                         mode == PIBBI_RGB_READY ? "READY" : "ERROR");
+                         mode == PIBBI_RGB_READY ? "READY" :
+                         mode == PIBBI_RGB_ERROR ? "ERROR" : "OFF");
             }
         }
 
@@ -74,6 +75,9 @@ static void rgb_task(void *arg)
         case PIBBI_RGB_ERROR:
             err = rgb_write((phase < 16U || (phase >= 32U && phase < 48U)) ?
                                 PIBBI_RGB_PEAK : 0U, 0, 0); /* red blink */
+            break;
+        case PIBBI_RGB_OFF:
+            err = rgb_write(0, 0, 0);
             break;
         default:
             err = ESP_ERR_INVALID_ARG;
@@ -94,7 +98,7 @@ esp_err_t pibbi_rgb_set_mode(pibbi_rgb_mode_t mode)
         return ESP_ERR_INVALID_STATE;
     }
     if (mode != PIBBI_RGB_BOOT && mode != PIBBI_RGB_READY &&
-        mode != PIBBI_RGB_ERROR) {
+        mode != PIBBI_RGB_ERROR && mode != PIBBI_RGB_OFF) {
         return ESP_ERR_INVALID_ARG;
     }
     return xQueueOverwrite(s_mode_queue, &mode) == pdTRUE ?
