@@ -460,6 +460,9 @@ void app_main(void)
                                pibbi_hit_confirm_no(x, y)) {
                         if (pibbi_lcd_set_view(PIBBI_LCD_HOME) == ESP_OK) {
                             confirm_shutdown = false;
+                            /* Cancel is still a human interaction; do not
+                             * immediately enter Rest after a long prompt. */
+                            behavior_event = PIBBI_EVENT_TOUCH;
                             ESP_LOGI(TAG, "SHUTDOWN_CANCELLED");
                         }
                     } else if (confirm_shutdown &&
