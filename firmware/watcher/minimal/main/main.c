@@ -179,6 +179,43 @@ static esp_err_t watcher_power_init(void)
     return ESP_OK;
 }
 
+#ifdef PIBBI_LCD_PROBE
+/* Both edge interrupts capture transitions while the main loop is blocked
+ * on LCD DMA. The ISR never draws or calls the behavior engine. */
+static portMUX_TYPE s_knob_mux = portMUX_INITIALIZER_UNLOCKED;
+static volatile uint8_t s_knob_last_ab = 0;
+static volatile int32_t s_knob_pending_edges = 0;
+static bool s_knob_irq_ready = false;
+
+static void watcher_knob_edge_isr(void *ctx)
+{
+    (void)ctx;
+    const unsigned a = (unsigned)gpio_get_level(WATCHER_KNOB_A);
+    const unsigned b = (unsigned)gpio_get_level(WATCHER_KNOB_B);
+    const uint8_t current = (uint8_t)((a << 1) | b);
+    portENTER_CRITICAL_ISR(&s_knob_mux);
+    const uint8_t previous = s_knob_last_ab;
+    s_knob_last_ab = current;
+    const int delta = pibbi_quadrature_delta(
+        (previous >> 1) & 1U, previous & 1U, a, b);
+    if (delta > 0 && s_knob_pending_edges < INT32_MAX) {
+        ++s_knob_pending_edges;
+    } else if (delta < 0 && s_knob_pending_edges > INT32_MIN) {
+        --s_knob_pending_edges;
+    }
+    portEXIT_CRITICAL_ISR(&s_knob_mux);
+}
+
+static int32_t watcher_knob_take_edges(void)
+{
+    portENTER_CRITICAL(&s_knob_mux);
+    const int32_t edges = s_knob_pending_edges;
+    s_knob_pending_edges = 0;
+    portEXIT_CRITICAL(&s_knob_mux);
+    return edges;
+}
+#endif
+
 static esp_err_t watcher_knob_init(void)
 {
     const gpio_config_t config = {
@@ -186,9 +223,46 @@ static esp_err_t watcher_knob_init(void)
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
+#ifdef PIBBI_LCD_PROBE
+        .intr_type = GPIO_INTR_ANYEDGE,
+#else
         .intr_type = GPIO_INTR_DISABLE,
+#endif
     };
-    return gpio_config(&config);
+    esp_err_t err = gpio_config(&config);
+    if (err != ESP_OK) {
+        return err;
+    }
+#ifdef PIBBI_LCD_PROBE
+    s_knob_last_ab = (uint8_t)(
+        (gpio_get_level(WATCHER_KNOB_A) << 1) |
+         gpio_get_level(WATCHER_KNOB_B));
+    s_knob_pending_edges = 0;
+
+    err = gpio_install_isr_service(0);
+    if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
+        err = gpio_isr_handler_add(WATCHER_KNOB_A, watcher_knob_edge_isr, NULL);
+        if (err == ESP_OK) {
+            err = gpio_isr_handler_add(
+                WATCHER_KNOB_B, watcher_knob_edge_isr, NULL);
+            if (err != ESP_OK) {
+                gpio_isr_handler_remove(WATCHER_KNOB_A);
+            }
+        }
+        if (err == ESP_OK) {
+            s_knob_irq_ready = true;
+            ESP_LOGI(TAG, "KNOB_IRQ_READY GPIO41/42 any-edge");
+            return ESP_OK;
+        }
+    }
+    /* A driver allocation failure must not break Watcher power/display.
+     * Retain legacy sampled inputs as a diagnosed fallback. */
+    ESP_LOGW(TAG, "KNOB_IRQ_FAIL, using sampled fallback: %s",
+             esp_err_to_name(err));
+    (void)gpio_set_intr_type(WATCHER_KNOB_A, GPIO_INTR_DISABLE);
+    (void)gpio_set_intr_type(WATCHER_KNOB_B, GPIO_INTR_DISABLE);
+#endif
+    return ESP_OK;
 }
 
 
@@ -312,15 +386,27 @@ void app_main(void)
         if (a != old_a || b != old_b) {
             ESP_LOGI(TAG, "INPUT raw_knob_a=%d raw_knob_b=%d", a, b);
 #ifdef PIBBI_LCD_PROBE
-            const int qdelta = pibbi_quadrature_delta(
-                (unsigned)old_a, (unsigned)old_b, (unsigned)a, (unsigned)b);
-            behavior_event = qdelta > 0 ? PIBBI_EVENT_KNOB_RIGHT :
-                             qdelta < 0 ? PIBBI_EVENT_KNOB_LEFT :
-                                          PIBBI_EVENT_KNOB_ACTIVITY;
+            if (!s_knob_irq_ready) {
+                const int qdelta = pibbi_quadrature_delta(
+                    (unsigned)old_a, (unsigned)old_b, (unsigned)a, (unsigned)b);
+                behavior_event = qdelta > 0 ? PIBBI_EVENT_KNOB_RIGHT :
+                                 qdelta < 0 ? PIBBI_EVENT_KNOB_LEFT :
+                                              PIBBI_EVENT_KNOB_ACTIVITY;
+            }
 #endif
             old_a = a;
             old_b = b;
         }
+#ifdef PIBBI_LCD_PROBE
+        if (s_knob_irq_ready) {
+            const int32_t edges = watcher_knob_take_edges();
+            if (edges != 0) {
+                ESP_LOGI(TAG, "INPUT encoder_edges=%" PRId32, edges);
+                behavior_event = edges > 0 ? PIBBI_EVENT_KNOB_RIGHT :
+                                             PIBBI_EVENT_KNOB_LEFT;
+            }
+        }
+#endif
 
         if (pca9535_read_input(&raw) == ESP_OK) {
             const int button = (raw & WATCHER_KNOB_BUTTON_BIT) != 0;
