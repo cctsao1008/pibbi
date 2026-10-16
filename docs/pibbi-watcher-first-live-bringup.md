@@ -96,3 +96,28 @@ User ran COM31 at 115200 with `pibbi_watcher_lcd_probe`, app version `8c519de` (
 - Source build/runtime status update: **actual on-device B1b OTA1 boot succeeds**, including power-hold and registered LCD/RGB services. Independent physical observations, multiple cold starts and knob/button exercise remain next gate.
 
 **Next bench verification:** watch the 412×412 display for the RGB565 concentric-ring test pattern; observe GPIO40 changing to dim green breathing, rotate and press the encoder while monitoring `INPUT raw_knob_*` messages, and perform three power cycles. Redact all device keys/unique identifiers from any logs shared externally; never attach a full NVS or 32 MiB backup.
+
+## Touch-screen OFF button — source implemented, new Windows build pending (2026-10-16)
+
+Requested interaction is an **on-screen LCD power-off button with SPD2010 touch**, not the encoder long-press or external pinhole switch. Lightweight framebuffer UI only (no LVGL): the existing LCD diagnostic rings show a bordered **OFF** button at the bottom (`x=122..289`, `y=338..401`). Tapping it displays **POWER OFF?**, with **YES** (left: `x=25..193`, `y=232..330`) and **NO** (right: `x=218..386`, `y=232..330`). Only a distinct second touch on YES can initiate shutdown. NO cancels and returns to the rings/OFF screen. Input starts unarmed until the first release and processes touch-down edges to reduce accidental activation.
+
+Hardware based on the pinned Seeed BSP: SPD2010 touch on **I2C1** / SDA GPIO39 / SCL GPIO38 / 400 kHz, no reset/interrupt pin, coordinate orientation 412×412 without XY swap or mirror. Managed dependency pinned `espressif/esp_lcd_touch_spd2010==0.0.1`. Existing PCA9535 power hold stays on **I2C0**. A successful touch init logs `TOUCH_READY`; a failure logs `TOUCH_FAIL` and does not enable touch shutdown; LCD and RGB remain operational.
+
+On a confirmed YES touch the firmware logs `SHUTDOWN_REQUESTED_BY_TOUCH`, commands RGB OFF, darkens the LCD backlight and read-modify-writes **only PCA9535 output P1.2 (`BSP_PWR_SYSTEM`) from 1 to 0**. Seeed's own BSP `bsp_system_shutdown()` uses that exact power-hold deassert. If USB remains connected, the ESP32-S3 may still be externally powered; in that case it waits with the display/LED off without reasserting the latch. If I2C shutdown fails it restores the backlight and reports the failure. This is not ESP deep sleep or restart.
+
+Updated files: `firmware/watcher/lcd-probe/main/lcd_first_frame.c`, `pibbi_power_ui.h`, `pibbi_touch.c/.h`, shared boot source `firmware/watcher/minimal/main/main.c` (under PIBBI_LCD_PROBE), and RGB OFF state in `pibbi_rgb.c/.h`. B1a-only build remains gated off from these UI/touch modifications. No clouds, PNG, LVGL or other runtime added.
+
+**Important: device is now already running OTA1.** The old `deploy-minimal-ota1.ps1` script deliberately refuses an occupied OTA1 and is not the correct way to update this version. Use new [tools/watcher/update-minimal-ota1.ps1](../tools/watcher/update-minimal-ota1.ps1): it rechecks the private baseline backup, exact live partition SHA and that actual OTA1 is selected; then writes and verifies **only** the application at 0xD10000. **No otadata changes**. Without `-Apply` it is a dry run. Keep the existing OTA0 fallback unchanged.
+
+PowerShell procedure (after closing COM31 Miniterm):
+
+    cd D:\my-github\pibbi
+    git pull --ff-only
+    .\tools\watcher\build-lcd-probe.ps1
+    .\tools\watcher\update-minimal-ota1.ps1 -Port COM31 -BackupDir 'D:\pibbi-private-backups\watcher-private-20261016-053954-115' -Apply
+
+After the app-only update, run `py -m serial.tools.miniterm COM31 115200`. Expected markers: `UI_READY`, `TOUCH_READY`, `TOUCH_OFF_BUTTON`, `SHUTDOWN_CONFIRM_SHOWN`, and either `SHUTDOWN_CANCELLED` or `SHUTDOWN_RELEASE_SYSTEM_POWER_HOLD` after YES. Confirm exact touch coordinates/visual response on hardware. Power may disappear before the last log line. Do not use this feature as a reliable emergency power-off until the first hardware test is complete.
+
+**Verification boundary:** source has been committed and structurally audited only; no new Windows Build PASS or actual SPD2010 touch/shutdown test has been reported. Do not claim successful shutdown until tested. ESP-IDF legacy I2C API remains in use to minimize changes during this hardware bring-up.
+
+Vendor reference: [SenseCAP Watcher BSP touch config and bsp_system_shutdown](https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware/blob/8e37f7ccd3d836bb99f483e0f6e74e8252406644/components/sensecap-watcher/sensecap-watcher.c), [BSP pins](https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware/blob/8e37f7ccd3d836bb99f483e0f6e74e8252406644/components/sensecap-watcher/include/sensecap-watcher.h).
