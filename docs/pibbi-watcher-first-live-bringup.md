@@ -128,3 +128,23 @@ Vendor reference: [SenseCAP Watcher BSP touch config and bsp_system_shutdown](ht
 - Minimal LCD render and GPIO40 RGB breathing had already been confirmed working on hardware.
 - No further flash, code change, unredacted device log sharing or provenance audit performed for this acceptance.
 - Power-rail/P1.2 current verification and distinct battery/USB behavior remain unmeasured, not prerequisites for accepting the observed UI interaction.
+
+
+## 2026-10-17 — Shutdown on USB is NOT a hardware power cut (corrected acceptance)
+
+**User-reported defect:** after UI OFF -> YES and successful PCA9535 P1.2 release, Windows COM31 was still available/usable. The captured UART sequence confirms \`SHUTDOWN_LATCH_RELEASED (USB may still supply power)\` and then \`--- Port closed: COM31 ---\` followed by \`--- Port opened: COM31 ---\`. A COM port reopening alone is not proof that the MCU continued executing: the USB-UART bridge may remain powered independently and terminal DTR/RTS activity can reset the MCU. Nevertheless, **we must not call this an electrically verified full power-off**.
+
+**Schematic evidence:** \`SenseCAP_Watcher_v1.0_SCH.pdf\`, page 4, \`Power IN & Charger\`. The MCU's 3.3 V regulator is supplied through battery/USB switching. \`EXP_POWER_ON/OFF\` drives Q10 and the Q23 battery hold path; a separate USB \`VBUS\` path through Q3 can still supply the regulator when P1.2 is low. The USB-to-UART IC is on the 3.3 V supply. See also GPIO expander P12 mapping \`EXP_POWER_ON/OFF\` on page 10. This is a **two-power-source board**, not a firmware-controlled upstream USB load switch. Presence of COM31 alone is not a valid power state indicator.
+
+**Source bug (confirmed):** immediately after deasserting P1.2, the prior firmware entered \`while(true) { vTaskDelay(1000ms); }\`. When powered from USB, this left an unseen ESP32-S3 application idling in an active RTOS rather than actually sleeping. The prior “shutdown PASS” referred to successful UI confirmation and latch write; **USB-connected shutdown behavior had not passed**.
+
+**Source-only fix, NOT built/flashed yet:** after the successful P1.2 output update, log \`SHUTDOWN_CPU_SLEEP_ENTER\` and call ESP-IDF v5.2.1 \`esp_deep_sleep_start()\` without enabling automatic timer wake. Battery-only power should turn off once the latch is released; with USB still connected the powered ESP32-S3 will enter low-power deep sleep instead of the active background loop. ESP-IDF \`esp_hw_support\` is explicitly required by the LCD-probe component. This **does not disconnect the USB-UART IC**; COM31 can remain enumerated and opening it could reset the chip via serial control lines. After software shutdown, waking a USB-powered sleeping unit may require a reset or power-cycle; intentional wake via front-panel button/expander interrupt has not yet been designed or verified.
+
+**Acceptance criteria separate different claims:**
+- OFF -> YES/NO UI behavior: already confirmed on device.
+- P1.2 write success: already logged; electrical state/current not measured.
+- With USB cable attached, MCU deep sleep (new source): pending build and physical verification, not a hardware-off claim.
+- Windows COM port disappears: **not a software-guaranteed requirement** with this board wiring; USB remains a power source.
+- Battery-only actual power cut / residual current: pending any needed electrical validation.
+
+No bootloader/partition/OTA0/NVS/Himax change. Rebuild in ESP-IDF v5.2.1 before *any* separately authorized OTA1-only app update. Do not use \`idf.py flash\`; the currently validated OTA1 image remains untouched during this code-review fix.
