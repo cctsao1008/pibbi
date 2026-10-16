@@ -43,6 +43,7 @@
 #define WATCHER_KNOB_B            GPIO_NUM_42
 
 #ifdef PIBBI_LCD_PROBE
+#include "pibbi_rgb.h"
 extern esp_err_t pibbi_lcd_first_frame(void);
 #endif
 
@@ -196,6 +197,16 @@ void app_main(void)
     boot_mark("I2C_READY");
 
     ESP_ERROR_CHECK(watcher_power_init());
+#ifdef PIBBI_LCD_PROBE
+    /* Independent RGB task runs while the LCD is initialized. */
+    esp_err_t rgb_rc = pibbi_rgb_init();
+    if (rgb_rc == ESP_OK) {
+        boot_mark("RGB_READY");
+    } else {
+        ESP_LOGW(TAG, "RGB indicator unavailable: %s", esp_err_to_name(rgb_rc));
+        boot_mark("RGB_FAIL");
+    }
+#endif
     ESP_ERROR_CHECK(watcher_knob_init());
     boot_mark("LOCAL_READY");
 #ifdef PIBBI_LCD_PROBE
@@ -203,9 +214,15 @@ void app_main(void)
     esp_err_t lcd_rc = pibbi_lcd_first_frame();
     if (lcd_rc == ESP_OK) {
         boot_mark("UI_READY");
+        if (rgb_rc == ESP_OK) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(pibbi_rgb_set_mode(PIBBI_RGB_READY));
+        }
     } else {
         ESP_LOGE(TAG, "B1b LCD first frame failed: %s", esp_err_to_name(lcd_rc));
         boot_mark("UI_FAIL");
+        if (rgb_rc == ESP_OK) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(pibbi_rgb_set_mode(PIBBI_RGB_ERROR));
+        }
     }
 #else
     ESP_LOGW(TAG, "B1a is UART + power/input only, NOT a display-ready firmware");
