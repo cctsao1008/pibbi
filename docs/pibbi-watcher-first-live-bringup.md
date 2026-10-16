@@ -138,7 +138,7 @@ Vendor reference: [SenseCAP Watcher BSP touch config and bsp_system_shutdown](ht
 
 **Source bug (confirmed):** immediately after deasserting P1.2, the prior firmware entered \`while(true) { vTaskDelay(1000ms); }\`. When powered from USB, this left an unseen ESP32-S3 application idling in an active RTOS rather than actually sleeping. The prior “shutdown PASS” referred to successful UI confirmation and latch write; **USB-connected shutdown behavior had not passed**.
 
-**Source-only fix, NOT built/flashed yet:** after the successful P1.2 output update, log \`SHUTDOWN_CPU_SLEEP_ENTER\` and call ESP-IDF v5.2.1 \`esp_deep_sleep_start()\` without enabling automatic timer wake. Battery-only power should turn off once the latch is released; with USB still connected the powered ESP32-S3 will enter low-power deep sleep instead of the active background loop. ESP-IDF \`esp_hw_support\` is explicitly required by the LCD-probe component. This **does not disconnect the USB-UART IC**; COM31 can remain enumerated and opening it could reset the chip via serial control lines. After software shutdown, waking a USB-powered sleeping unit may require a reset or power-cycle; intentional wake via front-panel button/expander interrupt has not yet been designed or verified.
+**Source-only fix, NOT built/flashed yet:** after the successful P1.2 output update, log \`SHUTDOWN_CPU_SLEEP_ENTER\` and call ESP-IDF v5.2.1 \`esp_deep_sleep_start()\` without enabling automatic timer wake. Battery-only power should turn off once the latch is released; with USB still connected the powered ESP32-S3 will enter low-power deep sleep instead of the active background loop. ESP-IDF \`esp_hw_support\` is explicitly required by the LCD-probe component. This **does not disconnect the USB-UART IC**; COM31 can remain enumerated and opening it could reset the chip via serial control lines. A subsequent source revision now attempts a guarded EXT0 wake source using GPIO2 / PCA9535 INT, following the pinned Seeed BSP. It clears the PCA9535 input-change interrupt and arms wake only if the rotary button and active-low INT are both released; otherwise shutdown proceeds without an armed wake and logs a warning. **This wake behavior is source-only, not yet physically verified**; COM serial-control lines can still reset the chip externally.
 
 **Acceptance criteria separate different claims:**
 - OFF -> YES/NO UI behavior: already confirmed on device.
@@ -148,3 +148,19 @@ Vendor reference: [SenseCAP Watcher BSP touch config and bsp_system_shutdown](ht
 - Battery-only actual power cut / residual current: pending any needed electrical validation.
 
 No bootloader/partition/OTA0/NVS/Himax change. Rebuild in ESP-IDF v5.2.1 before *any* separately authorized OTA1-only app update. Do not use \`idf.py flash\`; the currently validated OTA1 image remains untouched during this code-review fix.
+
+
+### 2026-10-17 — guarded USB power-off/wake patch (source-only)
+
+A second review of Watcher schematic page 10 confirms PCA9535 `INT` is routed to **ESP32-S3 GPIO2**, with an external pull-up. The official Seeed BSP's `bsp_system_deep_sleep()` also uses `esp_sleep_enable_ext0_wakeup(BSP_IO_EXPANDER_INT, 0)`, then `rtc_gpio_pullup_en()` and `rtc_gpio_pulldown_dis()` for this exact board. This path can wake an otherwise USB-powered sleeping CPU when the expander detects an input transition, including a rotary button press (P0.3), but the expander's INT is not an exclusive button signal.
+
+Implementation in `firmware/watcher/minimal/main/main.c` (LCD-probe build only):
+1. On touch-confirmed YES, switch WS2813 LED to OFF and LCD backlight OFF.
+2. Clear prior ESP-IDF sleep wake sources; configure GPIO2 as pulled-up input; read PCA9535 input registers twice with 20 ms settling to clear any pending change latch. If P0.3 is released and GPIO2 reads HIGH, arm ESP32-S3 RTC EXT0 wake on LOW and enable RTC pull-up (matching vendor BSP).
+3. If wake cannot be safely armed, log `SHUTDOWN_WAKE_NOT_ARMED` but continue to release P1.2 and enter Deep Sleep. Do not allow an active-low INT present before sleep to create a wake/reboot loop.
+4. Read-modify-write only PCA9535 P1.2 LOW (preserving all other outputs). On I2C error, restore LCD backlight and RGB ERROR as before.
+5. When powered by USB VBUS, log `SHUTDOWN_LATCH_RELEASED` and `SHUTDOWN_CPU_SLEEP_ENTER wake=GPIO2_EXT0_LOW` (or `wake=NONE`), allow 20 ms for UART drain, then call `esp_deep_sleep_start()` instead of returning to an active main loop. `BOOT_WAKE_CAUSE` is emitted on a subsequent real ESP-IDF deep-sleep wake.
+
+**Evidence boundary:** No ESP-IDF build, hardware flash, USB power-current reading or Wake-on-GPIO2 bench test has been performed for this latest patch. The current user-validated OTA1 image stays unchanged. COM31 hardware may remain enumerated and opening it can externally reset the CPU via DTR/RTS; `esp_deep_sleep_start()` cannot turn off the USB-UART chip. This limitation cannot be fixed by asserting a different MCU software state.
+
+Recommended future bench acceptance when convenient: after successful OTA1-only update, monitor that `SHUTDOWN_CPU_SLEEP_ENTER` is the last normal application event, with no periodic heartbeats while USB stays connected; then test whether a knob press creates a new `BOOT_WAKE_CAUSE=EXT0` boot and whether USB serial port control lines can reset the chip. If LCD/LED turns off but COM remains in the OS, that alone is not a failed CPU sleep test. Battery-only actual VCC cut remains a separate electrical criterion.
