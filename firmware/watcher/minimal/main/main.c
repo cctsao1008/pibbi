@@ -469,6 +469,8 @@ void app_main(void)
                         ESP_LOGE(TAG, "SHUTDOWN_FAILED %s",
                                  esp_err_to_name(rc));
                     } else if (!confirm_shutdown) {
+                        ESP_LOGI(TAG, "INPUT face_touch x=%u y=%u",
+                                 (unsigned)x, (unsigned)y);
                         behavior_event = PIBBI_EVENT_TOUCH; /* face tap */
                     }
                 }
