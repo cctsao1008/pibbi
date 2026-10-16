@@ -5,8 +5,8 @@
  * Seeed-Studio/SenseCAP-Watcher-Firmware @
  * 8e37f7ccd3d836bb99f483e0f6e74e8252406644
  *
- * DESIGN / BUILD ONLY: not tested on physical Watcher; do not flash
- * until actual partitions, factory backup, and recovery have been verified.
+ * Hardware behavior still requires first-live UART/LCD verification.
+ * Physical layout/backup already checked; B1b OTA1-only bring-up approved.
  */
 #include <inttypes.h>
 #include <stddef.h>
