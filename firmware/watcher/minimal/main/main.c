@@ -44,7 +44,8 @@
 
 #ifdef PIBBI_LCD_PROBE
 #include "pibbi_rgb.h"
-extern esp_err_t pibbi_lcd_first_frame(void);
+#include "pibbi_power_ui.h"
+#include "pibbi_touch.h"
 #endif
 
 static const char *TAG = "pibbi";
@@ -75,12 +76,11 @@ static esp_err_t pca9535_write16(uint8_t reg, uint16_t data)
     return rc;
 }
 
-static esp_err_t pca9535_read_input(uint16_t *out)
+static esp_err_t pca9535_read16(uint8_t reg, uint16_t *out)
 {
     if (out == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    const uint8_t reg = PCA9535_INPUT_REG;
     uint8_t bytes[2] = {0};
     esp_err_t rc = i2c_master_write_read_device(
         WATCHER_I2C_PORT, WATCHER_PCA9535_ADDR, &reg, 1,
@@ -89,6 +89,11 @@ static esp_err_t pca9535_read_input(uint16_t *out)
         *out = (uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8);
     }
     return rc;
+}
+
+static esp_err_t pca9535_read_input(uint16_t *out)
+{
+    return pca9535_read16(PCA9535_INPUT_REG, out);
 }
 
 static esp_err_t watcher_park_external_io(void)
@@ -185,10 +190,53 @@ static esp_err_t watcher_knob_init(void)
     return gpio_config(&config);
 }
 
+
+#ifdef PIBBI_LCD_PROBE
+/* Touch-confirmed shutdown. Seeed BSP's bsp_system_shutdown() deasserts
+ * expander P1.2 (BSP_PWR_SYSTEM); never modify the other power rails.
+ * USB power can keep the ESP32-S3 alive even after system latch release. */
+static esp_err_t watcher_touch_shutdown(void)
+{
+    ESP_LOGW(TAG, "SHUTDOWN_REQUESTED_BY_TOUCH");
+    ESP_ERROR_CHECK_WITHOUT_ABORT(pibbi_rgb_set_mode(PIBBI_RGB_OFF));
+    vTaskDelay(pdMS_TO_TICKS(80)); /* RGB task has time to turn LED dark. */
+    ESP_ERROR_CHECK_WITHOUT_ABORT(pibbi_lcd_backlight_off());
+
+    uint16_t current_outputs = 0;
+    esp_err_t rc = pca9535_read16(PCA9535_OUTPUT_REG, &current_outputs);
+    if (rc == ESP_OK) {
+        ESP_LOGW(TAG, "SHUTDOWN_RELEASE_SYSTEM_POWER_HOLD P1.2");
+        rc = pca9535_write16(PCA9535_OUTPUT_REG,
+                             current_outputs & ~WATCHER_POWER_SYSTEM);
+    }
+    if (rc != ESP_OK) {
+        ESP_LOGE(TAG, "Shutdown failed to release power latch: %s",
+                 esp_err_to_name(rc));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(pibbi_rgb_set_mode(PIBBI_RGB_ERROR));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(pibbi_lcd_backlight_on());
+        return rc;
+    }
+
+    /* Typically power disappears before reaching this point. With USB
+     * attached, keep the visible UI dark and never reassert the latch. */
+    ESP_LOGI(TAG, "SHUTDOWN_LATCH_RELEASED (USB may still supply power)");
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+#endif
+
 void app_main(void)
 {
     app_entry_us = esp_timer_get_time();
     boot_mark("APP_ENTER");
+#ifdef PIBBI_LCD_PROBE
+    bool touch_ready = false;
+    bool touch_was_down = false;
+    bool touch_can_arm = false; /* First release arms the touch interface. */
+    bool confirm_shutdown = false;
+    unsigned touch_errors = 0;
+#endif
 
     /* Critical boot path: no LVGL, audio, Wi-Fi, BLE, cloud, OTA, or NPU. */
     ESP_ERROR_CHECK(watcher_park_external_io());
@@ -216,6 +264,14 @@ void app_main(void)
         boot_mark("UI_READY");
         if (rgb_rc == ESP_OK) {
             ESP_ERROR_CHECK_WITHOUT_ABORT(pibbi_rgb_set_mode(PIBBI_RGB_READY));
+        }
+        esp_err_t touch_rc = pibbi_touch_init();
+        if (touch_rc == ESP_OK) {
+            touch_ready = true;
+            boot_mark("TOUCH_READY");
+        } else {
+            ESP_LOGW(TAG, "Touch unavailable: %s", esp_err_to_name(touch_rc));
+            boot_mark("TOUCH_FAIL");
         }
     } else {
         ESP_LOGE(TAG, "B1b LCD first frame failed: %s", esp_err_to_name(lcd_rc));
@@ -257,6 +313,50 @@ void app_main(void)
                 old_button = button;
             }
         }
+
+#ifdef PIBBI_LCD_PROBE
+        if (touch_ready) {
+            bool down = false;
+            uint16_t x = 0, y = 0;
+            const esp_err_t touch_rc = pibbi_touch_poll(&down, &x, &y);
+            if (touch_rc != ESP_OK) {
+                if ((touch_errors++ % 50U) == 0U) {
+                    ESP_LOGW(TAG, "Touch sample error: %s",
+                             esp_err_to_name(touch_rc));
+                }
+                /* A failed read must never count as a release or tap. */
+                touch_can_arm = false;
+            } else {
+                touch_errors = 0;
+                if (!down) {
+                    touch_can_arm = true;
+                } else if (touch_can_arm && !touch_was_down) {
+                    if (!confirm_shutdown &&
+                        pibbi_hit_home_off(x, y)) {
+                        ESP_LOGI(TAG, "TOUCH_OFF_BUTTON x=%u y=%u", x, y);
+                        if (pibbi_lcd_set_view(PIBBI_LCD_CONFIRM_POWER_OFF)
+                            == ESP_OK) {
+                            confirm_shutdown = true;
+                            ESP_LOGI(TAG, "SHUTDOWN_CONFIRM_SHOWN");
+                        }
+                    } else if (confirm_shutdown &&
+                               pibbi_hit_confirm_no(x, y)) {
+                        if (pibbi_lcd_set_view(PIBBI_LCD_HOME) == ESP_OK) {
+                            confirm_shutdown = false;
+                            ESP_LOGI(TAG, "SHUTDOWN_CANCELLED");
+                        }
+                    } else if (confirm_shutdown &&
+                               pibbi_hit_confirm_yes(x, y)) {
+                        ESP_LOGI(TAG, "TOUCH_CONFIRM_YES x=%u y=%u", x, y);
+                        esp_err_t rc = watcher_touch_shutdown();
+                        ESP_LOGE(TAG, "SHUTDOWN_FAILED %s",
+                                 esp_err_to_name(rc));
+                    }
+                }
+                touch_was_down = down;
+            }
+        }
+#endif
 
         const int64_t now_us = esp_timer_get_time();
         if (now_us >= next_heartbeat_us) {
