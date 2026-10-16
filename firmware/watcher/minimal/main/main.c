@@ -18,6 +18,9 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#ifdef PIBBI_LCD_PROBE
+#include "esp_sleep.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -292,12 +295,19 @@ static esp_err_t watcher_touch_shutdown(void)
         return rc;
     }
 
-    /* Typically power disappears before reaching this point. With USB
-     * attached, keep the visible UI dark and never reassert the latch. */
-    ESP_LOGI(TAG, "SHUTDOWN_LATCH_RELEASED (USB may still supply power)");
-    while (true) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+    /* Battery-only: releasing P1.2 cuts the latched VBAT path.
+     * USB attached: the separate VBUS -> Q3 -> 3.3V path can keep the
+     * ESP32-S3 and USB-UART adapter powered. A sleeping CPU must not
+     * continue running an invisible firmware background loop.
+     *
+     * This deliberately installs NO wake source. Re-powering the device
+     * or a physical chip reset is required to run app_main() again.
+     * The hardware USB-UART COM port may remain enumerated while USB is
+     * supplying its VCC; the port's existence is not proof of awake CPU.
+     */
+    ESP_LOGI(TAG, "SHUTDOWN_LATCH_RELEASED");
+    ESP_LOGI(TAG, "SHUTDOWN_CPU_SLEEP_ENTER (USB-UART may remain powered)");
+    esp_deep_sleep_start(); /* never returns if external VBUS keeps VCC on */
 }
 #endif
 
