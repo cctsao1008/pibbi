@@ -118,6 +118,13 @@ PowerShell procedure (after closing COM31 Miniterm):
 
 After the app-only update, run `py -m serial.tools.miniterm COM31 115200`. Expected markers: `UI_READY`, `TOUCH_READY`, `TOUCH_OFF_BUTTON`, `SHUTDOWN_CONFIRM_SHOWN`, and either `SHUTDOWN_CANCELLED` or `SHUTDOWN_RELEASE_SYSTEM_POWER_HOLD` after YES. Confirm exact touch coordinates/visual response on hardware. Power may disappear before the last log line. Do not use this feature as a reliable emergency power-off until the first hardware test is complete.
 
-**Verification boundary:** source has been committed and structurally audited only; no new Windows Build PASS or actual SPD2010 touch/shutdown test has been reported. Do not claim successful shutdown until tested. ESP-IDF legacy I2C API remains in use to minimize changes during this hardware bring-up.
+**Updated physical verification, 2026-10-16:** user confirmed the touch shutdown interface's behavior is correct on the physical Watcher. Functional OFF / confirmation / observed shutdown behavior is therefore USER-REPORTED PASS, superseding the earlier untested-source statement. The exact new build log or firmware digest was not shared; no oscilloscope/current measurements distinguish USB-powered versus battery-powered electrical cutoff. ESP-IDF legacy I2C API remains in use to minimize changes during this hardware bring-up.
 
 Vendor reference: [SenseCAP Watcher BSP touch config and bsp_system_shutdown](https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware/blob/8e37f7ccd3d836bb99f483e0f6e74e8252406644/components/sensecap-watcher/sensecap-watcher.c), [BSP pins](https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware/blob/8e37f7ccd3d836bb99f483e0f6e74e8252406644/components/sensecap-watcher/include/sensecap-watcher.h).
+
+### Hardware touch shutdown acceptance (user reported, 2026-10-16)
+
+- SPD2010 touch OFF + confirmation shutdown behavior: **PASS (reported by physical-device owner)**.
+- Minimal LCD render and GPIO40 RGB breathing had already been confirmed working on hardware.
+- No further flash, code change, unredacted device log sharing or provenance audit performed for this acceptance.
+- Power-rail/P1.2 current verification and distinct battery/USB behavior remain unmeasured, not prerequisites for accepting the observed UI interaction.
