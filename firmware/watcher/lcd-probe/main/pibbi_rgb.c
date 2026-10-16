@@ -5,6 +5,7 @@
  * protocol, RMT 10 MHz, non-DMA. One low-priority FreeRTOS task owns all
  * LED writes; other code only queues a status change. No LVGL or assets.
  */
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "driver/gpio.h"
