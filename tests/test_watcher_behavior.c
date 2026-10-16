@@ -36,6 +36,18 @@ static void stale_time_and_interrupted_blink(void) {
     assert(!pibbi_behavior_step(&s, 3249, PIBBI_EVENT_TOUCH));
     assert(s.last_ms == 3250 && s.pose.mode == PIBBI_BEHAVIOR_ENGAGED);
 }
+static void blink_waits_for_engagement_to_end(void) {
+    pibbi_behavior_t s;
+    pibbi_behavior_init(&s, 0);
+    assert(pibbi_behavior_step(&s, 1000, PIBBI_EVENT_KNOB_RIGHT));
+    assert(s.pose.mode == PIBBI_BEHAVIOR_ENGAGED);
+    assert(!pibbi_behavior_step(&s, 4999, PIBBI_EVENT_NONE));
+    assert(pibbi_behavior_step(&s, 5000, PIBBI_EVENT_NONE));
+    assert(s.pose.mode == PIBBI_BEHAVIOR_IDLE && !s.pose.blink);
+    assert(!pibbi_behavior_step(&s, 8199, PIBBI_EVENT_NONE));
+    assert(pibbi_behavior_step(&s, 8200, PIBBI_EVENT_NONE));
+    assert(s.pose.blink);
+}
 static void knob_gray_code(void) {
     assert(pibbi_quadrature_delta(0,0,0,1) == 1);
     assert(pibbi_quadrature_delta(0,1,1,1) == 1);
@@ -61,8 +73,9 @@ int main(void) {
     idle_blink();
     interaction_and_rest();
     stale_time_and_interrupted_blink();
+    blink_waits_for_engagement_to_end();
     knob_gray_code();
     deterministic_replay();
-    puts("PIBBI_BEHAVIOR_G0_PASS (5 groups)");
+    puts("PIBBI_BEHAVIOR_G0_PASS (6 groups)");
     return 0;
 }
