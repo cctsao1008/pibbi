@@ -45,6 +45,7 @@
 #ifdef PIBBI_LCD_PROBE
 #include "pibbi_rgb.h"
 #include "pibbi_power_ui.h"
+#include "pibbi_behavior.h"
 #include "pibbi_touch.h"
 #endif
 
@@ -236,6 +237,8 @@ void app_main(void)
     bool touch_can_arm = false; /* First release arms the touch interface. */
     bool confirm_shutdown = false;
     unsigned touch_errors = 0;
+    bool behavior_ready = false;
+    pibbi_behavior_t behavior = {0};
 #endif
 
     /* Critical boot path: no LVGL, audio, Wi-Fi, BLE, cloud, OTA, or NPU. */
@@ -262,6 +265,9 @@ void app_main(void)
     esp_err_t lcd_rc = pibbi_lcd_first_frame();
     if (lcd_rc == ESP_OK) {
         boot_mark("UI_READY");
+        pibbi_behavior_init(&behavior, (uint64_t)(esp_timer_get_time() / 1000));
+        behavior_ready = true;
+        boot_mark("BEHAVIOR_READY");
         if (rgb_rc == ESP_OK) {
             ESP_ERROR_CHECK_WITHOUT_ABORT(pibbi_rgb_set_mode(PIBBI_RGB_READY));
         }
@@ -298,10 +304,20 @@ void app_main(void)
     int64_t next_heartbeat_us = esp_timer_get_time() + 5000000;
 
     while (true) {
+#ifdef PIBBI_LCD_PROBE
+        pibbi_behavior_event_t behavior_event = PIBBI_EVENT_NONE;
+#endif
         const int a = gpio_get_level(WATCHER_KNOB_A);
         const int b = gpio_get_level(WATCHER_KNOB_B);
         if (a != old_a || b != old_b) {
             ESP_LOGI(TAG, "INPUT raw_knob_a=%d raw_knob_b=%d", a, b);
+#ifdef PIBBI_LCD_PROBE
+            const int qdelta = pibbi_quadrature_delta(
+                (unsigned)old_a, (unsigned)old_b, (unsigned)a, (unsigned)b);
+            behavior_event = qdelta > 0 ? PIBBI_EVENT_KNOB_RIGHT :
+                             qdelta < 0 ? PIBBI_EVENT_KNOB_LEFT :
+                                          PIBBI_EVENT_KNOB_ACTIVITY;
+#endif
             old_a = a;
             old_b = b;
         }
@@ -310,6 +326,11 @@ void app_main(void)
             const int button = (raw & WATCHER_KNOB_BUTTON_BIT) != 0;
             if (button != old_button) {
                 ESP_LOGI(TAG, "INPUT raw_knob_button=%d", button);
+#ifdef PIBBI_LCD_PROBE
+                if (!button) { /* PCA9535 P0.3 is active low. */
+                    behavior_event = PIBBI_EVENT_BUTTON;
+                }
+#endif
                 old_button = button;
             }
         }
@@ -351,9 +372,25 @@ void app_main(void)
                         esp_err_t rc = watcher_touch_shutdown();
                         ESP_LOGE(TAG, "SHUTDOWN_FAILED %s",
                                  esp_err_to_name(rc));
+                    } else if (!confirm_shutdown) {
+                        behavior_event = PIBBI_EVENT_TOUCH; /* face tap */
                     }
                 }
                 touch_was_down = down;
+            }
+        }
+#endif
+
+#ifdef PIBBI_LCD_PROBE
+        if (behavior_ready && !confirm_shutdown &&
+            pibbi_behavior_step(&behavior,
+                                (uint64_t)(esp_timer_get_time() / 1000),
+                                behavior_event)) {
+            esp_err_t draw_rc = pibbi_lcd_set_face(behavior.pose);
+            if (draw_rc != ESP_OK) {
+                ESP_LOGE(TAG, "FACE_RENDER_FAIL: %s", esp_err_to_name(draw_rc));
+                /* Disable repeated attempts on an unhealthy display DMA. */
+                behavior_ready = false;
             }
         }
 #endif
