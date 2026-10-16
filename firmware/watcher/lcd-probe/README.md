@@ -1,6 +1,6 @@
-# Watcher B1b — SPD2010 LCD First Frame (Build-only)
+# Watcher B1b / pibbi v0.1 — First Behavior
 
-Status: **source committed, BUILD and hardware unverified**. This is an ESP-IDF project separate from the B1a Minimal image. No Flash or erase is authorized.
+Status: B1b's underlying Watcher power, LCD, RGB and touch-shutdown hardware has **already been verified by the user**. The new **v0.1 face and behavior changes are source-only**, with host-only Behavior Engine tests passed; ESP-IDF rebuild and v0.1 on-device validation remain pending. The existing guarded OTA1 updater is the only intended application-write path.
 
 ## Target and design
 
@@ -11,7 +11,8 @@ Status: **source committed, BUILD and hardware unverified**. This is an ESP-IDF 
 - No LVGL, UI assets, large framebuffer, PSRAM, networking, factory Task Flow, SenseCraft, Cloud, audio or HX6538 firmware changes.
 - Uses a single 412×16 pixel DMA-capable RGB565 stripe buffer (~12.9 KiB). All 27 stripe transfers are callback/timeout synchronized before enabling PWM backlight. The last stripe draws 12 rows.
 - The 0-to-412 X address range satisfies SPD2010's documented 4-pixel horizontal alignment requirement.
-- Draws simple concentric rings as a visible board bring-up test; this is not a finished pibbi UI.
+- The first-boot diagnostic concentric rings have been replaced in **v0.1 source** by pibbi eyes, a tiny fixed `PIBBI` title and preserved `OFF` -> `POWER OFF?` -> YES/NO touchscreen confirmation.
+- A pure C Behavior Engine produces Idle/Engaged/Rest, blink and gaze changes from actual local inputs. **Only the face rectangle is DMA-refreshed** for pose changes; see [v0.1 behavior plan](../../../docs/pibbi-first-behavior-v01.md).
 
 ## Boot marks
 
@@ -37,12 +38,12 @@ pibbi_watcher_lcd_probe.elf
 pibbi_watcher_lcd_probe.bin
 ```
 
-**Do not execute the `idf.py flash` commands that ESP-IDF prints after a successful build.** Only B2 recovery validation and separately explicit authorization can unlock device writes.
+**Do not execute ESP-IDF's generic `idf.py flash` / `app-flash` commands.** For the already-running OTA1 user device, use only the guarded `tools/watcher/update-minimal-ota1.ps1` after a successful build and an explicit local `-Apply`. This script targets `0xD10000` and does not touch OTA metadata.
 
 ## Verification boundaries
 
 - The user's **B1a build PASS** provides no proof B1b compiles or controls the actual LCD. B1b is a separate build target.
-- Original Watcher's slow power-on path and flash layout/security are still unmeasured.
+- Physical OTA1 B1b startup was verified by UART (`UI_READY` at 1.075 s), and the user confirmed LCD, RGB and touch shutdown behavior. **The newer v0.1 behavior source has not yet been built or flashed.**
 - A build PASS validates compilation/linking and component compatibility, not DMA transfer completion timing, display colors, touch, power latch stability, or cold-boot performance.
 - For first hardware bring-up after B2, use UART logging and conservative brightness to distinguish `LCD_INIT_START`, `UI_READY` and `UI_FAIL`. Three cold starts and comparison to original factory image are required.
 
