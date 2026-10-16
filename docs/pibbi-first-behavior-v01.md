@@ -1,6 +1,6 @@
 # pibbi v0.1 — First Behavior (Watcher)
 
-Status (2026-10-16): **the original v0.1 behavior firmware has now booted and run on physical Watcher OTA1**. Blink, Engaged, gaze and knob/button inputs are evidenced by UART. A subsequent performance/input-reliability source refinement is **NOT YET rebuilt or device-tested**. Pure-C host tests previously passed (5 groups).
+Status (2026-10-16): **v0.1 and the subsequent eye-ROI / encoder-IRQ / blink-scheduling refinement have both booted and run on the physical Watcher OTA1**. UART confirms LCD, RGB, behavior, rotary ISR, improved frame timing, touch recovery, OFF/NO cancellation and OFF/YES power-latch release. Rest (60 s no input) and independent power-current measurements remain open. Host-only pure-C tests had previously passed 5 groups; a sixth regression test is present but no separate new host test execution log is available.
 No automatic OTA1 write, branch merge or PR has been performed.
 
 ## Purpose
@@ -118,3 +118,30 @@ One **Touch I2C transaction failure** is recorded immediately after `TOUCH_READY
 - These changes do **not** touch bootloader, OTA selection metadata, OTA0, NVS, HX6538, or existing user-confirmed shutdown mechanism. **Source commits are not physical flash operations.**
 
 Next validation: rebuild with ESP-IDF v5.2.1; inspect new `KNOB_IRQ_READY` vs `KNOB_IRQ_FAIL`, `TOUCH_RECOVERED`, `FACE_FRAME ... eye=220x96`, compare latency distribution to 106.852ms baseline, run two-stage OFF/NO and OFF/YES, and hold idle over 60s to verify Rest.
+
+## 2026-10-16 — refined v0.1 firmware real Watcher acceptance (app `71bda59`)
+
+User-provided second COM31/115200 capture (Oct 16, compiled 23:39:14) establishes an actual **OTA1 (`0xD10000`) run** with the previously source-only refinements. No assistant performed a flash. The following are **measured UART timings, not estimated display response to finger movement**:
+
+| Evidence | Value |
+|---|---|
+| Boot `APP_ENTER` | 353.261 ms |
+| `UI_READY` | **1,078.177 ms** (app elapsed 724.920 ms) |
+| `BEHAVIOR_READY` | 1,081.674 ms |
+| `TOUCH_READY` | 1,248.102 ms |
+| ISR setup | **`KNOB_IRQ_READY GPIO41/42 any-edge`** |
+| Eye-only region and frame count | **220×96 pixels, n=14** |
+| Eye-only update, min / mean / median / max | **58.169 / 58.449 / 58.395 / 58.737 ms** |
+| Eye plus mouth (`23552` pixels) | **n=2; mean 78.966 ms** |
+| All 16 face updates | **mean 61.014 ms** |
+| Comparison to previous user trace (n=25, mean 106.852 ms for 252×164) | Eye-only updates **45.3% less time**, ~**1.83×** update throughput; fewer pixels were transferred (−48.9%) |
+
+Functional outcomes in the same trace:
+
+- GPIO41/42 interrupt installation succeeded, `INPUT encoder_edges` recorded signed counts such as `+2`, `-3`; both `gaze=+1` and `gaze=-1` were rendered, and the knob button returned face to center. Physical rotary detent accuracy or jitter rate is not yet calibrated.
+- Three blink=1/0 pairs with 160 ms log-to-log close/open difference are visible; the current deterministic blink scheduler no longer produces the immediate post-engagement blink observed in the previous trace.
+- SPD2010 touch initialization succeeded. One I2C transaction failed on the first post-init poll at ~1.25s, then **`TOUCH_RECOVERED after 1 failed polls` at 1.332s**. Later touch behavior is conclusively functional: OFF button registered **3 times**, `SHUTDOWN_CANCELLED` **2 times**, then a confirmed YES invoked `SHUTDOWN_REQUESTED_BY_TOUCH`, RGB OFF and `SHUTDOWN_RELEASE_SYSTEM_POWER_HOLD P1.2` at **25.162s**. The UART also reports `SHUTDOWN_LATCH_RELEASED`; USB versus battery current and actual rail-off timing were not measured.
+- No `FACE_RENDER_FAIL`, crash, reboot loop or watchdog failure appears in the capture. Current boot-to-UI timing is virtually identical to prior 1,077.885 ms first-behavior run.
+- **Rest remains unverified:** total trace ends near 25.2s and includes input activity, so it never achieves 60s inactivity. No `INPUT face_touch` is in this capture; only the OFF/confirmation screen touch flow is exercised. A dedicated tap on the face area would verify the non-shutdown touch action.
+
+**Decision:** This firmware revision is a viable first-behavior **bench baseline**. Do not introduce additional code churn solely to remove the one transient I2C error. Next targeted checks: hands-off ≥65s to observe `FACE_FRAME mode=2`, one non-OFF face touch (`INPUT face_touch`), and optional encoder detent repeatability. Keep `ota_0`, NVS, OTA metadata and HX6538 untouched; no flashing required to collect these observations.
