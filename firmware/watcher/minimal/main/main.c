@@ -392,7 +392,9 @@ void app_main(void)
 #ifdef PIBBI_LCD_PROBE
     const esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
     if (wake_cause != ESP_SLEEP_WAKEUP_UNDEFINED) {
-        ESP_LOGI(TAG, "BOOT_WAKE_CAUSE=%d", (int)wake_cause);
+        ESP_LOGI(TAG, "BOOT_WAKE_CAUSE=%s(%d)",
+                 wake_cause == ESP_SLEEP_WAKEUP_EXT0 ? "EXT0" : "OTHER",
+                 (int)wake_cause);
     }
 #endif
 #ifdef PIBBI_LCD_PROBE
