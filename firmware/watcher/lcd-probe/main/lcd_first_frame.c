@@ -5,7 +5,7 @@
  * Source pin: Seeed-Studio/SenseCAP-Watcher-Firmware
  * 8e37f7ccd3d836bb99f483e0f6e74e8252406644
  *
- * Build-only until user's factory backup and recovery gate passes.
+ * Minimal first-frame bring-up; hardware UI behavior not yet verified.
  */
 #include <stdbool.h>
 #include <stdint.h>
