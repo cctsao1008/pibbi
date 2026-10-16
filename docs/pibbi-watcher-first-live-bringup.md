@@ -57,3 +57,15 @@ Inspect the command output for `PRIVATE_BACKUP_AND_OTA1_SNAPSHOT_PASS`, `LIVE_PR
 After rollback confirm boot offset **0x110000**. The read-flash/OTA tool uses download mode; the Watcher may need manual BOOT/RESET if automatic reset cannot access the ROM. If COM31 cannot connect, **do not repeatedly flash/erase**; diagnose USB reset/boot first.
 
 Potential unresolved runtime risks: panel DMA callbacks, PCA9535 power sequence, SPI3 QSPI timing and backlight; a Build PASS is not a hardware display PASS. Thus UI_READY and first physical pixels must be measured on-device. The goal is fast pibbi minimal functionality, NOT OEM firmware restoration.
+
+## GPIO40 WS2813-Mini RGB (Minimal Firmware)
+
+The same B1b ESP32-S3 image now contains **one low-priority FreeRTOS breathing task** for the onboard addressable LED. Hardware/timing follow the pinned Seeed Watcher BSP: GPIO40, one GRB pixel, WS2812-compatible protocol over RMT at 10 MHz, no RMT DMA, `led_strip` pinned v2.5.4. LED power starts after the PCA9535 supply/latch setup.
+
+- `BOOT`: low-brightness **blue breathing** as soon as `pibbi_rgb_init()` succeeds; period ~2.56 seconds, output range 2..32/255.
+- `READY`: low-brightness **green breathing** when the LCD first-frame driver returns ESP_OK and `UI_READY` is logged.
+- `ERROR`: **red blinking** when the LCD setup or transfer fails and `UI_FAIL` is logged; 640 ms on / 640 ms off.
+- Dedicated task `pibbi_rgb` uses a length-one FreeRTOS queue and owns all ongoing `led_strip_set_pixel()` / `led_strip_refresh()` calls; `app_main()` only requests a mode change. Stack 3072 bytes, priority `tskIDLE_PRIORITY+1`, 40 ms update cadence. No extra animation engine, LVGL, PNG files or network.
+- RGB initialization failure emits `RGB_FAIL` and a warning; it does **not** block LCD first-frame bring-up. A successful LED init emits `RGB_READY`. Power latch / IO expander errors prior to LED startup still abort as before.
+
+**Source-only change, not yet Windows BUILD_PASS nor hardware tested.** `idf_component.yml` now declares managed component `led_strip==2.5.4` and B1b CMake compiles `pibbi_rgb.c`; refresh the component manager during `build-lcd-probe.ps1`. Because both GPIO41/42 pullups and LED code were modified, rebuild before any OTA1 deployment. No additional device writes were run while making these edits.
