@@ -22,6 +22,9 @@ static void interaction_and_rest(void) {
     assert(!pibbi_behavior_step(&s, 2000, PIBBI_EVENT_NONE));
     assert(pibbi_behavior_step(&s, 5000, PIBBI_EVENT_NONE));
     assert(s.pose.mode == PIBBI_BEHAVIOR_IDLE && s.pose.gaze == 0);
+    /* Exact boundary: 59,999 ms idle is not Rest; 60,000 ms is. */
+    (void)pibbi_behavior_step(&s, 60999, PIBBI_EVENT_NONE);
+    assert(s.pose.mode == PIBBI_BEHAVIOR_IDLE);
     assert(pibbi_behavior_step(&s, 61000, PIBBI_EVENT_NONE));
     assert(s.pose.mode == PIBBI_BEHAVIOR_REST && !s.pose.blink);
     assert(pibbi_behavior_step(&s, 62000, PIBBI_EVENT_TOUCH));
