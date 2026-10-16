@@ -69,3 +69,30 @@ The same B1b ESP32-S3 image now contains **one low-priority FreeRTOS breathing t
 - RGB initialization failure emits `RGB_FAIL` and a warning; it does **not** block LCD first-frame bring-up. A successful LED init emits `RGB_READY`. Power latch / IO expander errors prior to LED startup still abort as before.
 
 **Source-only change, not yet Windows BUILD_PASS nor hardware tested.** `idf_component.yml` now declares managed component `led_strip==2.5.4` and B1b CMake compiles `pibbi_rgb.c`; refresh the component manager during `build-lcd-probe.ps1`. Because both GPIO41/42 pullups and LED code were modified, rebuild before any OTA1 deployment. No additional device writes were run while making these edits.
+
+## B1b First Live Boot — ESP32-S3 OTA1 **UART PASS** (2026-10-16)
+
+User ran COM31 at 115200 with `pibbi_watcher_lcd_probe`, app version `8c519de` (compile time 2026-10-16 21:44:31). Physical bootloader on ESP-IDF v5.2.1 explicitly reported `Loaded app from partition at offset 0xd10000`. This is the first confirmed ESP32-S3 **OTA1 firmware runtime**; the app is not just a build artifact.
+
+| Observed milestone | Boot timestamp | app_elapsed_us where logged |
+|---|---:|---:|
+| OTA1 app loaded by bootloader | 208 ms | n/a |
+| `APP_ENTER` | 349.749 ms | 3 us |
+| `EXTERNAL_IO_PARKED` | 438.173 ms | 88,427 us |
+| `I2C_READY` | 446.993 ms | 97,247 us |
+| `POWER_HOLD` | 454.861 ms | 105,115 us |
+| `POWER_PERIPHERALS` | 604.324 ms | 254,578 us |
+| RGB task `RGB_READY` | 617.947 ms | 268,201 us |
+| `LOCAL_READY` | 644.381 ms | 294,635 us |
+| `LCD_INIT_START` | 652.330 ms | 302,584 us |
+| `UI_READY` | **1074.692 ms** | **724,946 us** |
+| `HEARTBEAT` | 6124.521 ms | 5,774,775 us |
+| `HEARTBEAT` | 11124.520 ms | 10,774,774 us |
+
+- First frame transmission completed and LCD backlight enabled (`pibbi_lcd` reported success at 1079 ms), and the system marked `UI_READY` at **1.074692 s** since boot / **0.724946 s** after `APP_ENTER`.
+- RGB GPIO40 RMT task creation was logged (`RGB_READY`) before LCD init; status transitioned to `RGB_MODE=READY` after `UI_READY`. **Physical LED colors, visible breathing, actual LCD pixel colors, and knob/button operation remain unverified** from UART alone. The BOOT blue period is very short (~0.46 s after RGB init before green), so it may be difficult to see.
+- No `UI_FAIL`, `RGB_FAIL`, crash, boot loop or reset appears in the supplied ~11.1 s excerpt; two later heartbeats support ongoing main-loop operation. The log includes the ESP-IDF **legacy I2C driver warning**; this is a modernization note, not an observed failure.
+- Existing user-built baseline reached `app_main` around 1.991 s and continued PNG asset loading to >=31.681 s, whereas B1b reports first-frame completion at 1.075 s. **Do not call the difference a quantified boot-to-interactive speedup:** the old capture lacked a comparable first-pixel or UI-ready marker and the B1b first pixel is not yet visually confirmed. The current B1b boot log shows CPU frequency 160 MHz, versus 240 MHz in the prior image.
+- Source build/runtime status update: **actual on-device B1b OTA1 boot succeeds**, including power-hold and registered LCD/RGB services. Independent physical observations, multiple cold starts and knob/button exercise remain next gate.
+
+**Next bench verification:** watch the 412×412 display for the RGB565 concentric-ring test pattern; observe GPIO40 changing to dim green breathing, rotate and press the encoder while monitoring `INPUT raw_knob_*` messages, and perform three power cycles. Redact all device keys/unique identifiers from any logs shared externally; never attach a full NVS or 32 MiB backup.
