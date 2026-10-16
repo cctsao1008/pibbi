@@ -22,6 +22,7 @@
 #include "esp_lcd_spd2010.h"
 #include "pibbi_power_ui.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -108,6 +109,7 @@ static esp_lcd_panel_handle_t s_panel = NULL;
 static SemaphoreHandle_t s_color_done = NULL;
 static uint16_t *s_stripe = NULL;
 static pibbi_lcd_view_t s_view = PIBBI_LCD_HOME;
+static pibbi_face_pose_t s_face = {.mode = PIBBI_BEHAVIOR_IDLE, .blink = false, .gaze = 0};
 
 static const uint8_t *font_rows(char c)
 {
@@ -121,6 +123,8 @@ static const uint8_t *font_rows(char c)
     static const uint8_t f[7] = {31,16,16,30,16,16,16};
     static const uint8_t y[7] = {17,17,10,4,4,4,4};
     static const uint8_t s[7] = {15,16,16,14,1,1,30};
+    static const uint8_t b[7] = {30,17,17,30,17,17,30};
+    static const uint8_t i[7] = {31,4,4,4,4,4,31};
     static const uint8_t n[7] = {17,25,21,19,17,17,17};
     static const uint8_t q[7] = {14,17,1,6,4,0,4};
     switch (c) {
@@ -132,6 +136,8 @@ static const uint8_t *font_rows(char c)
     case 'F': return f;
     case 'Y': return y;
     case 'S': return s;
+    case 'B': return b;
+    case 'I': return i;
     case 'N': return n;
     case '?': return q;
     default: return blank;
@@ -187,7 +193,7 @@ static uint16_t pixel_color(int x, int y, pibbi_lcd_view_t view)
         return UINT16_C(0x0000);
     }
 
-    /* Existing diagnostic rings; OFF button overlays their lower edge. */
+    /* Fixed OFF target is outside the live face update rectangle. */
     if (pibbi_hit_home_off((unsigned)x, (unsigned)y)) {
         if (text_pixel(x, y, 170, 356, "OFF", 4)) {
             return UINT16_C(0xFFFF);
@@ -195,46 +201,127 @@ static uint16_t pixel_color(int x, int y, pibbi_lcd_view_t view)
         return (x < 126 || x >= 286 || y < 342 || y >= 398)
             ? UINT16_C(0xFFFF) : UINT16_C(0x2104);
     }
-    const int dx = x - LCD_WIDTH / 2;
-    const int dy = y - LCD_HEIGHT / 2;
-    const int radius2 = dx * dx + dy * dy;
-    if (radius2 < 38 * 38) {
-        return UINT16_C(0xFFFF);
+
+    /* Static title is part of full-screen painting, not the eye ROI. */
+    if (text_pixel(x, y, 161, 64, "PIBBI", 3)) {
+        return UINT16_C(0x7DFF);
     }
-    if (radius2 < 86 * 86) {
-        return UINT16_C(0x07E0);
+
+    /* Two eyes, no sprites, assets, LVGL, PSRAM or framebuffer.
+     * Integer-only ellipse calculation for deterministic pixel generation. */
+    const int cx = x < 206 ? 142 : 270;
+    const int dx = x - cx;
+    const int dy = y - 184;
+    const int rx = 39;
+    const int ry = s_face.mode == PIBBI_BEHAVIOR_REST ? 10 :
+                   s_face.mode == PIBBI_BEHAVIOR_ENGAGED ? 43 : 37;
+    const bool in_eye = dx >= -rx && dx <= rx && dy >= -ry && dy <= ry &&
+        ((dx * dx * 100) / (rx * rx) + (dy * dy * 100) / (ry * ry)) <= 100;
+
+    if (s_face.blink) {
+        if (dx >= -38 && dx <= 38 && dy >= -3 && dy <= 3) {
+            return UINT16_C(0xC7FF); /* thin blink stroke */
+        }
+    } else if (in_eye) {
+        if (s_face.mode == PIBBI_BEHAVIOR_REST) {
+            return UINT16_C(0x9CF3); /* relaxed half-closed eyes */
+        }
+        const int pdx = x - (cx + 12 * (int)s_face.gaze);
+        const int pdy = y - 184;
+        if (pdx * pdx + pdy * pdy <= 12 * 12) {
+            return UINT16_C(0x0841);
+        }
+        return s_face.mode == PIBBI_BEHAVIOR_ENGAGED ?
+            UINT16_C(0xBFFF) : UINT16_C(0xFFFF);
     }
-    if (radius2 < 126 * 126) {
-        return UINT16_C(0x0410);
+    /* Simple mouth subtly changes with attention/rest.
+     * No eyes are rendered in the OFF confirmation view. */
+    const int mx = x - 206;
+    if (mx >= -31 && mx <= 31) {
+        const int mouth_y = s_face.mode == PIBBI_BEHAVIOR_ENGAGED ?
+                            262 + (31 - (mx < 0 ? -mx : mx)) / 6 :
+                            s_face.mode == PIBBI_BEHAVIOR_REST ? 268 :
+                            264 + (31 - (mx < 0 ? -mx : mx)) / 10;
+        if (y >= mouth_y - 2 && y <= mouth_y + 2) {
+            return UINT16_C(0x7DFF);
+        }
     }
     return UINT16_C(0x0000);
 }
 
-static esp_err_t draw_view(pibbi_lcd_view_t view)
+/* x coordinates must be multiples of four for SPD2010 QSPI. */
+static esp_err_t draw_rect(int x0, int y0, int x1, int y1,
+                           pibbi_lcd_view_t view)
 {
-    if (s_panel == NULL || s_stripe == NULL || s_color_done == NULL) {
-        return ESP_ERR_INVALID_STATE;
+    if (s_panel == NULL || s_stripe == NULL || s_color_done == NULL ||
+        x0 < 0 || y0 < 0 || x1 > LCD_WIDTH || y1 > LCD_HEIGHT ||
+        x0 >= x1 || y0 >= y1 || (x0 % 4) != 0 || (x1 % 4) != 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const int width = x1 - x0;
+    if (width * LCD_STRIPE_HEIGHT * (int)sizeof(uint16_t) >
+        LCD_TRANSFER_BYTES) {
+        return ESP_ERR_INVALID_SIZE;
     }
 
-    for (int y0 = 0; y0 < LCD_HEIGHT; y0 += LCD_STRIPE_HEIGHT) {
-        const int y1 = (y0 + LCD_STRIPE_HEIGHT <= LCD_HEIGHT)
-            ? y0 + LCD_STRIPE_HEIGHT : LCD_HEIGHT;
-        for (int y = y0; y < y1; ++y) {
-            for (int x = 0; x < LCD_WIDTH; ++x) {
-                s_stripe[(y - y0) * LCD_WIDTH + x] = pixel_color(x, y, view);
+    for (int row = y0; row < y1; row += LCD_STRIPE_HEIGHT) {
+        const int last = (row + LCD_STRIPE_HEIGHT <= y1) ?
+                         row + LCD_STRIPE_HEIGHT : y1;
+        for (int y = row; y < last; ++y) {
+            for (int x = x0; x < x1; ++x) {
+                s_stripe[(y - row) * width + (x - x0)] =
+                    pixel_color(x, y, view);
             }
         }
         esp_err_t err = esp_lcd_panel_draw_bitmap(
-            s_panel, 0, y0, LCD_WIDTH, y1, s_stripe);
+            s_panel, x0, row, x1, last, s_stripe);
         if (err != ESP_OK) {
             return err;
         }
         if (xSemaphoreTake(s_color_done, pdMS_TO_TICKS(2000)) != pdTRUE) {
-            /* Never free/reuse the DMA buffer after an uncertain transfer. */
             return ESP_ERR_TIMEOUT;
         }
     }
-    s_view = view;
+    return ESP_OK;
+}
+
+static esp_err_t draw_view(pibbi_lcd_view_t view)
+{
+    esp_err_t err = draw_rect(0, 0, LCD_WIDTH, LCD_HEIGHT, view);
+    if (err == ESP_OK) {
+        s_view = view;
+    }
+    return err;
+}
+
+esp_err_t pibbi_lcd_set_face(pibbi_face_pose_t pose)
+{
+    if (s_panel == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (pose.mode > PIBBI_BEHAVIOR_REST ||
+        pose.gaze < -1 || pose.gaze > 1) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (pose.mode == s_face.mode && pose.blink == s_face.blink &&
+        pose.gaze == s_face.gaze) {
+        return ESP_OK;
+    }
+    const pibbi_face_pose_t previous = s_face;
+    s_face = pose;
+    if (s_view != PIBBI_LCD_HOME) {
+        return ESP_OK; /* Never cover the shutdown confirmation page. */
+    }
+    const int64_t start_us = esp_timer_get_time();
+    /* Eyes + mouth only: 252x164 vs full 412x412, no OFF overlap. */
+    esp_err_t err = draw_rect(80, 136, 332, 300, PIBBI_LCD_HOME);
+    if (err != ESP_OK) {
+        s_face = previous;
+        return err;
+    }
+    ESP_LOGI(TAG, "FACE_FRAME mode=%d blink=%u gaze=%d us=%lld region=252x164",
+             (int)pose.mode, (unsigned)pose.blink, (int)pose.gaze,
+             (long long)(esp_timer_get_time() - start_us));
     return ESP_OK;
 }
 
