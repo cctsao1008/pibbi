@@ -2,3 +2,4 @@ dependencies:
   idf: ">=5.2.1,<5.3.0"
   espressif/esp_lcd_spd2010: "==1.0.1"
   led_strip: "==2.5.4"
+  espressif/esp_lcd_touch_spd2010: "==0.0.1"
