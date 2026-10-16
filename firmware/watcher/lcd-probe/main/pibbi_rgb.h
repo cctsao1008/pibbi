@@ -6,7 +6,8 @@
 typedef enum {
     PIBBI_RGB_BOOT = 0,  /* blue breathing */
     PIBBI_RGB_READY,     /* green breathing */
-    PIBBI_RGB_ERROR      /* red blinking */
+    PIBBI_RGB_ERROR,     /* red blinking */
+    PIBBI_RGB_OFF        /* dark before shutdown */
 } pibbi_rgb_mode_t;
 
 esp_err_t pibbi_rgb_init(void);
