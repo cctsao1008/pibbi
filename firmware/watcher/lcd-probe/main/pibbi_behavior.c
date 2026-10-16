@@ -28,7 +28,10 @@ bool pibbi_behavior_step(pibbi_behavior_t *state, uint64_t now_ms,
         state->last_interaction_ms = now_ms;
         state->engaged_until_ms = now_ms + ENGAGED_MS;
         state->blink_end_ms = 0;
-        state->next_blink_ms = now_ms + FIRST_BLINK_MS;
+        /* Blink only after engagement has ended and the face has settled.
+         * Previously this deadline fell inside the 4s Engaged window,
+         * causing an immediate blink on return to Idle. */
+        state->next_blink_ms = state->engaged_until_ms + FIRST_BLINK_MS;
         state->pose.gaze = event == PIBBI_EVENT_KNOB_LEFT ? -1 :
                            event == PIBBI_EVENT_KNOB_RIGHT ? 1 : 0;
     }
