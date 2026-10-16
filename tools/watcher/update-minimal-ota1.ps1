@@ -27,12 +27,16 @@ if ($size -lt 10000 -or $size -ge $maxBytes) { throw "BIN does not fit OTA1" }
 
 # Refuse an accidentally stale BIN when adding a touch UI source file.
 $binTime = (Get-Item -LiteralPath $fw).LastWriteTimeUtc
-foreach ($name in @("pibbi_touch.c","pibbi_power_ui.h","lcd_first_frame.c","pibbi_rgb.c")) {
+foreach ($name in @("pibbi_touch.c","pibbi_touch.h","pibbi_power_ui.h","lcd_first_frame.c","pibbi_rgb.c","pibbi_rgb.h","pibbi_behavior.c","pibbi_behavior.h","CMakeLists.txt","idf_component.yml")) {
     $sourceFile = Join-Path $fwDir "main\$name"
     if (-not (Test-Path -LiteralPath $sourceFile) -or
         (Get-Item -LiteralPath $sourceFile).LastWriteTimeUtc -gt $binTime) {
         throw "B1b BIN older than $name or source missing; run build-lcd-probe.ps1"
     }
+}
+$sharedSource = Join-Path $repo "firmware\\watcher\\minimal\\main\\main.c"
+if ((Get-Item -LiteralPath $sharedSource).LastWriteTimeUtc -gt $binTime) {
+    throw "B1b BIN older than shared minimal/main/main.c; rebuild before OTA1 update"
 }
 Write-Host "PIBBI OTA1 UPDATE: Port=$Port Offset=$otaOffset Bytes=$size"
 Write-Host "BIN SHA256: $((Get-FileHash -Algorithm SHA256 -LiteralPath $fw).Hash)"
