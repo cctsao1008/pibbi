@@ -20,7 +20,7 @@ if ($LASTEXITCODE -ne 0 -or $IdfVersion -notmatch '\bv5\.2\.1\b') {
     throw "ESP-IDF v5.2.1 required; detected: $IdfVersion."
 }
 Write-Host "[pibbi B1b] $IdfVersion"
-Write-Host "[pibbi B1b] Standalone QSPI SPD2010 first-frame project."
+Write-Host "[pibbi B1b] Standalone QSPI SPD2010 first-frame + GPIO40 breathing RGB project."
 Write-Host "[pibbi B1b] This script only invokes idf.py build. NO FLASH/ERASE/MONITOR."
 Write-Host "[pibbi B1b] Component Manager may fetch pinned espressif/esp_lcd_spd2010 v1.0.1."
 
@@ -39,7 +39,7 @@ try {
     Write-Host "ELF: $elf"
     Write-Host "ELF SHA256: $((Get-FileHash -Algorithm SHA256 -LiteralPath $elf).Hash)"
     if (Test-Path -LiteralPath $bin) {
-        Write-Host "Application BIN: $bin (DO NOT FLASH)"
+        Write-Host "Application BIN: $bin (use guarded deploy-minimal-ota1.ps1; NEVER generic idf.py flash/app-flash)"
     }
 } finally {
     Pop-Location
