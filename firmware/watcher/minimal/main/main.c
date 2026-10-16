@@ -20,6 +20,7 @@
 #include "esp_timer.h"
 #ifdef PIBBI_LCD_PROBE
 #include "esp_sleep.h"
+#include "driver/rtc_io.h"
 #endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -44,6 +45,9 @@
 /* Quadrature channels wired directly to ESP32-S3, not the expander. */
 #define WATCHER_KNOB_A            GPIO_NUM_41
 #define WATCHER_KNOB_B            GPIO_NUM_42
+#ifdef PIBBI_LCD_PROBE
+#define WATCHER_IO_EXPANDER_INT   GPIO_NUM_2  /* PCA9535 INT, active low */
+#endif
 
 #ifdef PIBBI_LCD_PROBE
 #include "pibbi_rgb.h"
@@ -270,15 +274,85 @@ static esp_err_t watcher_knob_init(void)
 
 
 #ifdef PIBBI_LCD_PROBE
-/* Touch-confirmed shutdown. Seeed BSP's bsp_system_shutdown() deasserts
- * expander P1.2 (BSP_PWR_SYSTEM); never modify the other power rails.
- * USB power can keep the ESP32-S3 alive even after system latch release. */
+/* Arm the same EXT0 wake pin used by the pinned Seeed Watcher BSP's
+ * bsp_system_deep_sleep(). PCA9535 INT on ESP32-S3 RTC GPIO2 is low
+ * when an input changes (including rotary press on P0.3).
+ *
+ * Clear any pending input-change IRQ and ensure that neither the input
+ * nor INT is already low before arming LEVEL_LOW wake. Otherwise an
+ * already asserted INT can cause an immediate shutdown/wake cycle.
+ * The 10k hardware pull-up on INT is shown in the Watcher schematic.
+ */
+static esp_err_t watcher_arm_shutdown_wake(void)
+{
+    esp_err_t rc = esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    if (rc != ESP_OK) {
+        return rc;
+    }
+    const gpio_config_t irq_input = {
+        .pin_bit_mask = 1ULL << WATCHER_IO_EXPANDER_INT,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    rc = gpio_config(&irq_input);
+    if (rc != ESP_OK) {
+        return rc;
+    }
+
+    uint16_t inputs = 0;
+    rc = pca9535_read_input(&inputs); /* Clears expander change latch. */
+    if (rc != ESP_OK) {
+        return rc;
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+    rc = pca9535_read_input(&inputs);
+    if (rc != ESP_OK) {
+        return rc;
+    }
+    if ((inputs & WATCHER_KNOB_BUTTON_BIT) == 0 ||
+        gpio_get_level(WATCHER_IO_EXPANDER_INT) != 1) {
+        return ESP_ERR_INVALID_STATE; /* Cannot safely arm level-low wake. */
+    }
+
+    rc = esp_sleep_enable_ext0_wakeup(WATCHER_IO_EXPANDER_INT, 0);
+    if (rc != ESP_OK) {
+        return rc;
+    }
+    rc = rtc_gpio_pullup_en(WATCHER_IO_EXPANDER_INT);
+    if (rc != ESP_OK) {
+        (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_EXT0);
+        return rc;
+    }
+    rc = rtc_gpio_pulldown_dis(WATCHER_IO_EXPANDER_INT);
+    if (rc != ESP_OK) {
+        (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_EXT0);
+        return rc;
+    }
+    ESP_LOGI(TAG, "SHUTDOWN_WAKE_ARMED gpio=2 trigger=PCA9535_INT_LOW");
+    return ESP_OK;
+}
+
+/* Touch-confirmed shutdown: OFF -> YES. Release battery power hold.
+ * With USB VBUS still present, deep sleep stops execution (COM port
+ * enumeration is controlled by the separately powered USB-UART bridge). */
 static esp_err_t watcher_touch_shutdown(void)
 {
     ESP_LOGW(TAG, "SHUTDOWN_REQUESTED_BY_TOUCH");
     ESP_ERROR_CHECK_WITHOUT_ABORT(pibbi_rgb_set_mode(PIBBI_RGB_OFF));
     vTaskDelay(pdMS_TO_TICKS(80)); /* RGB task has time to turn LED dark. */
     ESP_ERROR_CHECK_WITHOUT_ABORT(pibbi_lcd_backlight_off());
+
+    /* Preparing the wake source needs an operational PCA9535/I2C bus, so
+     * it must precede releasing the battery's power-hold latch. If it
+     * cannot be armed, still shut down: an externally triggered reset
+     * or full power cycle is the fallback while on USB power. */
+    esp_err_t wake_rc = watcher_arm_shutdown_wake();
+    if (wake_rc != ESP_OK) {
+        ESP_LOGW(TAG, "SHUTDOWN_WAKE_NOT_ARMED: %s",
+                 esp_err_to_name(wake_rc));
+    }
 
     uint16_t current_outputs = 0;
     esp_err_t rc = pca9535_read16(PCA9535_OUTPUT_REG, &current_outputs);
@@ -295,19 +369,19 @@ static esp_err_t watcher_touch_shutdown(void)
         return rc;
     }
 
-    /* Battery-only: releasing P1.2 cuts the latched VBAT path.
-     * USB attached: the separate VBUS -> Q3 -> 3.3V path can keep the
-     * ESP32-S3 and USB-UART adapter powered. A sleeping CPU must not
-     * continue running an invisible firmware background loop.
-     *
-     * This deliberately installs NO wake source. Re-powering the device
-     * or a physical chip reset is required to run app_main() again.
-     * The hardware USB-UART COM port may remain enumerated while USB is
-     * supplying its VCC; the port's existence is not proof of awake CPU.
+    /* Battery only: P1.2 release normally disconnects the battery path.
+     * USB VBUS present: the MCU still has power, so enter Deep Sleep
+     * instead of the old invisible active RTOS loop. An expander input
+     * transition (e.g. encoder press) may wake via GPIO2 if armed.
+     * USB-UART is a separate device and COM can stay enumerated. Also,
+     * PC serial-control lines can externally reset the ESP32-S3; Deep
+     * Sleep by itself cannot prevent such hardware resets.
      */
     ESP_LOGI(TAG, "SHUTDOWN_LATCH_RELEASED");
-    ESP_LOGI(TAG, "SHUTDOWN_CPU_SLEEP_ENTER (USB-UART may remain powered)");
-    esp_deep_sleep_start(); /* never returns if external VBUS keeps VCC on */
+    ESP_LOGI(TAG, "SHUTDOWN_CPU_SLEEP_ENTER wake=%s",
+             wake_rc == ESP_OK ? "GPIO2_EXT0_LOW" : "NONE");
+    vTaskDelay(pdMS_TO_TICKS(20)); /* Let the last UART log drain. */
+    esp_deep_sleep_start(); /* No return while MCU remains powered. */
 }
 #endif
 
@@ -315,6 +389,12 @@ void app_main(void)
 {
     app_entry_us = esp_timer_get_time();
     boot_mark("APP_ENTER");
+#ifdef PIBBI_LCD_PROBE
+    const esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
+    if (wake_cause != ESP_SLEEP_WAKEUP_UNDEFINED) {
+        ESP_LOGI(TAG, "BOOT_WAKE_CAUSE=%d", (int)wake_cause);
+    }
+#endif
 #ifdef PIBBI_LCD_PROBE
     bool touch_ready = false;
     bool touch_was_down = false;
