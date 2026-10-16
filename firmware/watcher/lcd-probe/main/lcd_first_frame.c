@@ -313,15 +313,27 @@ esp_err_t pibbi_lcd_set_face(pibbi_face_pose_t pose)
         return ESP_OK; /* Never cover the shutdown confirmation page. */
     }
     const int64_t start_us = esp_timer_get_time();
-    /* Eyes + mouth only: 252x164 vs full 412x412, no OFF overlap. */
-    esp_err_t err = draw_rect(80, 136, 332, 300, PIBBI_LCD_HOME);
+    /* The blinking/gaze pixels are all within this eye rectangle.
+     * Keep the mouth separate, since its shape changes only when mode changes.
+     * Both x boundaries are multiples of 4 as required by SPD2010. */
+    esp_err_t err = draw_rect(96, 136, 316, 232, PIBBI_LCD_HOME);
     if (err != ESP_OK) {
         s_face = previous;
         return err;
     }
-    ESP_LOGI(TAG, "FACE_FRAME mode=%d blink=%u gaze=%d us=%lld region=252x164",
+    const bool mouth_changed = pose.mode != previous.mode;
+    if (mouth_changed) {
+        err = draw_rect(168, 252, 244, 284, PIBBI_LCD_HOME);
+        if (err != ESP_OK) {
+            s_face = previous;
+            return err;
+        }
+    }
+    ESP_LOGI(TAG, "FACE_FRAME mode=%d blink=%u gaze=%d us=%lld pixels=%d eye=220x96 mouth=%u",
              (int)pose.mode, (unsigned)pose.blink, (int)pose.gaze,
-             (long long)(esp_timer_get_time() - start_us));
+             (long long)(esp_timer_get_time() - start_us),
+             220 * 96 + (mouth_changed ? 76 * 32 : 0),
+             (unsigned)mouth_changed);
     return ESP_OK;
 }
 
