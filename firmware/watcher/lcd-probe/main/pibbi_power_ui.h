@@ -2,6 +2,7 @@
 /* Minimal fixed 412x412 framebuffer UI and touch target mapping, no LVGL. */
 #include <stdbool.h>
 #include "esp_err.h"
+#include "pibbi_behavior.h"
 
 typedef enum {
     PIBBI_LCD_HOME = 0,
@@ -22,5 +23,7 @@ static inline bool pibbi_hit_confirm_no(unsigned x, unsigned y) {
 
 esp_err_t pibbi_lcd_first_frame(void);
 esp_err_t pibbi_lcd_set_view(pibbi_lcd_view_t view);
+/* Only the face region is refreshed when the behavior pose changes. */
+esp_err_t pibbi_lcd_set_face(pibbi_face_pose_t pose);
 esp_err_t pibbi_lcd_backlight_off(void);
 esp_err_t pibbi_lcd_backlight_on(void);
