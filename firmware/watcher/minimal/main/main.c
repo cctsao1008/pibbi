@@ -311,6 +311,7 @@ void app_main(void)
     bool touch_can_arm = false; /* First release arms the touch interface. */
     bool confirm_shutdown = false;
     unsigned touch_errors = 0;
+    unsigned touch_recoveries = 0;
     bool behavior_ready = false;
     pibbi_behavior_t behavior = {0};
 #endif
@@ -434,6 +435,15 @@ void app_main(void)
                 /* A failed read must never count as a release or tap. */
                 touch_can_arm = false;
             } else {
+                if (touch_errors != 0U) {
+                    ++touch_recoveries;
+                    if (touch_recoveries <= 3U ||
+                        (touch_recoveries % 50U) == 0U) {
+                        ESP_LOGI(TAG,
+                                 "TOUCH_RECOVERED after %u failed polls",
+                                 touch_errors);
+                    }
+                }
                 touch_errors = 0;
                 if (!down) {
                     touch_can_arm = true;
